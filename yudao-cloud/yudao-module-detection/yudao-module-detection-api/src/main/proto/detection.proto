@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package cn.iocoder.yudao.module.detection.api;
+
+option java_multiple_files = true;
+option java_package = "cn.iocoder.yudao.module.detection.api";
+option java_outer_classname = "DetectionProto";
+
+service DetectionService {
+  // 上传 TDMS 文件并进行实时检测分析
+  // 支持客户端流式上传文件块
+  rpc UploadAndDetect (stream FileChunk) returns (DetectionResult);
+}
+
+message FileChunk {
+  bytes content = 1;
+  string filename = 2; // 仅在第一个包发送
+  FilterAlgorithm algorithm = 3; // 仅在第一个包发送
+}
+
+enum FilterAlgorithm {
+  KALMAN = 0;           // 卡尔曼滤波
+  LMS = 1;              // LMS自适应
+  NLMS = 2;             // NLMS归一化
+  RLS = 3;              // RLS递推
+  MEAN = 4;             // 均值滤波
+  MEDIAN = 5;           // 中值滤波
+  GAUSSIAN = 6;         // 高斯滤波
+  BUTTERWORTH = 7;      // 巴特沃斯
+  CHEBYSHEV = 8;        // 切比雪夫
+  FIR = 9;              // FIR滤波
+  IIR = 10;             // IIR滤波
+  WIENER = 11;          // 维纳滤波
+  WAVELET = 12;         // 小波滤波
+  MORPHOLOGY = 13;      // 形态学
+  BILATERAL = 14;       // 双边滤波
+  SG_SMOOTH = 15;       // SG平滑
+  PARTICLE = 16;        // 粒子滤波
+  EKF = 17;             // 扩展卡尔曼
+  UKF = 18;             // 无损卡尔曼
+  ADAPTIVE_NOTCH = 19;  // 自适应陷波
+}
+
+message DetectionResult {
+  string job_id = 1;
+  int64 sample_count = 2;
+  int64 anomaly_count = 3;
+  double processing_time_ms = 4;
+  double throughput_mbps = 5;
+  repeated AnomalyEvent anomalies = 6;
+}
+
+message AnomalyEvent {
+  int64 timestamp = 1;
+  double value = 2;
+  double energy = 3;
+}

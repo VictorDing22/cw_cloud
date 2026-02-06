@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yudao-module-detection-server
+  namespace: default
+  labels:
+    app: yudao-module-detection-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yudao-module-detection-server
+  template:
+    metadata:
+      labels:
+        app: yudao-module-detection-server
+    spec:
+      containers:
+      - name: yudao-module-detection-server
+        image: yudao-module-detection-server:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+          name: grpc
+        - containerPort: 48080
+          name: http
+        env:
+        - name: SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR
+          value: "nacos-headless.default.svc.cluster.local:8848" # 请修改为您的 Nacos 地址
+        - name: TZ
+          value: "Asia/Shanghai"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2048Mi"
+            cpu: "2000m"
+        livenessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 15
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yudao-module-detection-server-svc
+  namespace: default
+spec:
+  selector:
+    app: yudao-module-detection-server
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 9090
+      targetPort: 9090
+    - name: http
+      protocol: TCP
+      port: 48080
+      targetPort: 48080
+  type: ClusterIP

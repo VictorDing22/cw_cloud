@@ -29,6 +29,7 @@
         <module>yudao-module-iot</module>
         <module>yudao-module-filter</module>
         <module>yudao-module-monitor</module>
+        <module>yudao-module-detection</module>
     </modules>
 
     <name>${project.artifactId}</name>

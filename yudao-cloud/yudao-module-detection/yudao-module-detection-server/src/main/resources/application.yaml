@@ -1,0 +1,21 @@
+server:
+  port: 48080
+
+spring:
+  application:
+    name: yudao-module-detection-server
+  main:
+    allow-circular-references: true
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+
+grpc:
+  server:
+    port: 9090
+
+yudao:
+  web:
+    admin-ui:
+      url: http://localhost:48080/admin-ui
