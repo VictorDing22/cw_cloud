@@ -239,7 +239,18 @@
           @change="applyProgress"
           class="progress-slider"
         />
-        <span class="time">
+        
+        <span class="label" style="margin-left: 20px">速度：</span>
+        <el-slider
+          v-model="playSpeed"
+          :min="1"
+          :max="20"
+          :step="1"
+          class="speed-slider"
+        />
+        <span class="time" style="min-width: 30px; text-align: right;">{{ playSpeed }}x</span>
+
+        <span class="time" style="margin-left: 20px">
           {{ currentTime.toFixed(3) }} s / {{ totalTime.toFixed(3) }} s
         </span>
       </div>
@@ -292,8 +303,8 @@ const playHead = ref(0)
 const timer = ref<number | null>(null)
 
 // 历史分析终极方案（不动实时检测）：X 轴固定 [0, windowSize-1]，只渲染窗口内的点
-// 固定播放速度为 3，窗口点数为 500
-const playSpeed = 3
+// 默认播放速度为 3，窗口点数为 500
+const playSpeed = ref(3)
 const windowSize = 500
 
 const canAnalyze = computed(
@@ -660,7 +671,7 @@ const tick = () => {
 
   // 按"索引"推进播放：每 40ms 推进 playSpeed 个点（允许小数，靠 playHead 累积）
   playHead.value = Math.max(playHead.value, playIndex.value)
-  playHead.value += playSpeed
+  playHead.value += playSpeed.value
   const idx = Math.min(Math.floor(playHead.value), pts.length - 1)
   playIndex.value = idx
   renderByIndex(playIndex.value)
