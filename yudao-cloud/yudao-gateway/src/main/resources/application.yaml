@@ -200,6 +200,15 @@ spring:
             - Path=/admin-api/iot/**
           filters:
             - RewritePath=/admin-api/iot/v3/api-docs, /v3/api-docs # 配置，保证转发到 /v3/api-docs
+        ## detection-server 服务
+        - id: detection-admin-api
+          uri: http://127.0.0.1:48083
+          predicates:
+            - Path=/admin-api/detection/**
+        - id: detection-websocket
+          uri: http://127.0.0.1:48083
+          predicates:
+            - Path=/ws/detection/**
         ## monitor-server 服务
         - id: monitor-api
           # 本地开发直连（避免 Nacos/服务发现未就绪导致 503）

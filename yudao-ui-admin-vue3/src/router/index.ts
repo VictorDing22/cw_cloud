@@ -6,12 +6,13 @@ import filterRouter from './modules/filter'
 import iotRouters from './modules/iot'
 import realtimeRouter from './modules/realtime'
 import monitorRouter from './modules/monitor'
+import detectionRouter from './modules/detection'
 
 // 创建路由实例
 const router = createRouter({
   history: createWebHistory(import.meta.env.VITE_BASE_PATH), // createWebHashHistory URL带#，createWebHistory URL不带#
   strict: true,
-  routes: [...remainingRouter, filterRouter, ...iotRouters, realtimeRouter, monitorRouter] as RouteRecordRaw[],
+  routes: [...remainingRouter, filterRouter, ...iotRouters, realtimeRouter, monitorRouter, detectionRouter] as RouteRecordRaw[],
   scrollBehavior: () => ({ left: 0, top: 0 })
 })
 

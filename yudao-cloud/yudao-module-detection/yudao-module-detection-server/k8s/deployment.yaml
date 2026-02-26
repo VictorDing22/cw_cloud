@@ -1,6 +1,53 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: tdengine
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tdengine
+  template:
+    metadata:
+      labels:
+        app: tdengine
+    spec:
+      containers:
+      - name: tdengine
+        image: tdengine/tdengine:3.0.5.0
+        ports:
+        - containerPort: 6030
+          name: native
+        - containerPort: 6041
+          name: restful
+        env:
+        - name: TAOS_FQDN
+          value: "tdengine-service"
+        resources:
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tdengine-service
+  namespace: default
+spec:
+  selector:
+    app: tdengine
+  ports:
+    - name: native
+      port: 6030
+      targetPort: 6030
+    - name: restful
+      port: 6041
+      targetPort: 6041
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: yudao-module-detection-server
   namespace: default
   labels:
@@ -24,28 +71,32 @@ spec:
           name: grpc
         - containerPort: 48080
           name: http
+        - containerPort: 9999
+          name: netty
         env:
         - name: SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR
-          value: "nacos-headless.default.svc.cluster.local:8848" # 请修改为您的 Nacos 地址
+          value: "nacos-headless.default.svc.cluster.local:8848"
+        - name: DETECTION_NETTY_PORT
+          value: "9999"
+        - name: TDENGINE_URL
+          value: "jdbc:TAOS://tdengine-service:6030/yudao_detection"
         - name: TZ
           value: "Asia/Shanghai"
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "1024Mi"
+            cpu: "1000m"
           limits:
-            memory: "2048Mi"
+            memory: "4096Mi"
             cpu: "2000m"
         livenessProbe:
           tcpSocket:
             port: 9090
-          initialDelaySeconds: 30
-          periodSeconds: 10
+          initialDelaySeconds: 60
         readinessProbe:
           tcpSocket:
             port: 9090
-          initialDelaySeconds: 15
-          periodSeconds: 10
+          initialDelaySeconds: 30
 ---
 apiVersion: v1
 kind: Service
@@ -64,4 +115,43 @@ spec:
       protocol: TCP
       port: 48080
       targetPort: 48080
-  type: ClusterIP
+    - name: netty
+      protocol: TCP
+      port: 9999
+      targetPort: 9999
+    - name: data-provider
+      protocol: TCP
+      port: 9998
+      targetPort: 9998
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yudao-detection-flink-job
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yudao-detection-flink-job
+  template:
+    metadata:
+      labels:
+        app: yudao-detection-flink-job
+    spec:
+      containers:
+       - name: flink-job
+         image: yudao-module-detection-server:latest
+         command: ["java", "-cp", "/app/app.jar", "cn.iocoder.yudao.module.detection.flink.DetectionFlinkJob", "yudao-module-detection-server-svc", "9998"]
+         env:
+        - name: TZ
+          value: "Asia/Shanghai"
+        resources:
+          requests:
+            memory: "1024Mi"
+            cpu: "1000m"
+          limits:
+            memory: "2048Mi"
+            cpu: "2000m"
+

@@ -18,6 +18,7 @@ public class FilterResult implements Serializable {
     private static final long serialVersionUID = 1L;
     
     private long timestamp;
+    private String channel;
     private double originalValue;
     private double filteredValue;
     private boolean anomaly;

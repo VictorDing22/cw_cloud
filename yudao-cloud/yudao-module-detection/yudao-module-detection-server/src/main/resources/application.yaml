@@ -1,11 +1,25 @@
 server:
-  port: 48080
+  port: 48083
 
 spring:
   application:
     name: yudao-module-detection-server
   main:
     allow-circular-references: true
+    allow-bean-definition-overriding: true
+
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+knif4j:
+  enable: false
   cloud:
     nacos:
       discovery:
@@ -19,3 +33,12 @@ yudao:
   web:
     admin-ui:
       url: http://localhost:48080/admin-ui
+  detection:
+    netty-port: 9999
+    data-port: 9998
+    flink-parallelism: 1
+    filter-window-ms: 5000
+    anomaly-threshold: 3.0
+    tdengine-batch-size: 1000
+    tdengine-batch-interval: 200
+    tdengine-url: jdbc:TAOS://tdengine-service:6030/yudao_detection

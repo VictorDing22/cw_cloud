@@ -53,9 +53,15 @@ public class GenericFilterProcessFunction extends KeyedProcessFunction<String, T
 
     @Override
     public void open(Configuration parameters) throws Exception {
-        windowState = getRuntimeContext().getState(new ValueStateDescriptor<>("window", TypeInformation.of(new TypeHint<Deque<WindowEntry>>() {})));
-        anomalyCountState = getRuntimeContext().getState(new ValueStateDescriptor<>("anomalyCount", Long.class));
-        statsState = getRuntimeContext().getState(new ValueStateDescriptor<>("stats", TypeInformation.of(new TypeHint<WindowStats>() {})));
+        try {
+            if (getRuntimeContext() != null) {
+                windowState = getRuntimeContext().getState(new ValueStateDescriptor<>("window", TypeInformation.of(new TypeHint<Deque<WindowEntry>>() {})));
+                anomalyCountState = getRuntimeContext().getState(new ValueStateDescriptor<>("anomalyCount", Long.class));
+                statsState = getRuntimeContext().getState(new ValueStateDescriptor<>("stats", TypeInformation.of(new TypeHint<WindowStats>() {})));
+            }
+        } catch (IllegalStateException e) {
+            // Local test mode or context not initialized
+        }
         
         lastCheckTime = System.currentTimeMillis();
         localProcessedCount = 0;
@@ -131,6 +137,7 @@ public class GenericFilterProcessFunction extends KeyedProcessFunction<String, T
         // 5. Output
         FilterResult result = FilterResult.builder()
                 .timestamp(sample.getTimestamp())
+                .channel(sample.getChannel())
                 .originalValue(sample.getValue())
                 .filteredValue(filtered)
                 .anomaly(anomaly)
@@ -147,10 +154,12 @@ public class GenericFilterProcessFunction extends KeyedProcessFunction<String, T
     }
 
     private void loadState() throws Exception {
-        window = windowState.value();
-        Long ac = anomalyCountState.value();
-        anomalyCount = (ac == null) ? 0L : ac;
-        stats = statsState.value();
+        if (windowState != null) {
+            window = windowState.value();
+            Long ac = anomalyCountState.value();
+            anomalyCount = (ac == null) ? 0L : ac;
+            stats = statsState.value();
+        }
 
         if (window == null) window = new ArrayDeque<>();
         if (stats == null) stats = new WindowStats();
