@@ -98,11 +98,13 @@
         <div class="task-details mt-4">
           <el-descriptions :column="3" border size="small">
             <el-descriptions-item label="任务ID">{{ currentTask.id }}</el-descriptions-item>
-            <el-descriptions-item label="文件名">{{ currentTask.filename }}</el-descriptions-item>
+            <el-descriptions-item label="信号源">{{ currentTask.filename }}</el-descriptions-item>
             <el-descriptions-item label="滤波算法">{{ currentTask.algorithm }}</el-descriptions-item>
             <el-descriptions-item label="文件大小">{{ currentTask.size }}</el-descriptions-item>
             <el-descriptions-item label="当前状态">{{ statusText }}</el-descriptions-item>
-            <el-descriptions-item label="预计用时">{{ currentTask.duration || '计算中...' }}</el-descriptions-item>
+            <el-descriptions-item label="处理速度">
+              {{ currentTask.speed ? `${Number.parseFloat(String(currentTask.speed)).toFixed(2)} MB/s` : '计算中...' }}
+            </el-descriptions-item>
           </el-descriptions>
         </div>
       </div>
@@ -230,7 +232,7 @@ const currentTask = reactive({
   filename: '',
   algorithm: '',
   size: '',
-  duration: '',
+  speed: '',
   status: ''
 })
 
@@ -302,6 +304,7 @@ const startDetection = async () => {
         const statusRes = await DetectionApi.getTaskStatus(currentTask.id)
         progress.value = statusRes.progress
         currentTask.status = statusRes.status
+        currentTask.speed = statusRes.speed
         
         if (statusRes.status === 'COMPLETED') {
           clearInterval(timer)

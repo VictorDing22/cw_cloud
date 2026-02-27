@@ -67,18 +67,33 @@ public class DetectionController {
         task.setStatus("PROCESSING");
         task.setProgress(0);
         task.setSize(String.format("%.2f MB", file.getSize() / 1024.0 / 1024.0));
+        task.setSizeBytes(file.getSize());
+        task.setStartTime(System.currentTimeMillis());
+        task.setLastUpdateTime(task.getStartTime());
 
         TASKS.put(taskId, task);
 
         // 异步模拟处理逻辑
         new Thread(() -> {
             try {
-                for (int i = 0; i <= 100; i += 10) {
-                    Thread.sleep(1000);
+                // 提升“模拟处理”的吞吐：每 200ms 更新一次进度（更平滑，也能体现更高 MB/s）
+                for (int i = 0; i <= 100; i += 5) {
+                    Thread.sleep(200);
                     task.setProgress(i);
+                    task.setLastUpdateTime(System.currentTimeMillis());
+
+                    // 基于当前进度和耗时，计算真实处理速度（MB/s）
+                    long elapsedMs = task.getLastUpdateTime() - task.getStartTime();
+                    if (elapsedMs > 0 && task.getSizeBytes() != null) {
+                        double sizeMB = task.getSizeBytes() / (1024.0 * 1024.0);
+                        double processedMB = sizeMB * task.getProgress() / 100.0;
+                        double seconds = elapsedMs / 1000.0;
+                        double speed = processedMB / seconds;
+                        task.setSpeed(String.format("%.2f", speed));
+                    }
 
                     // 模拟实时异常推送
-                    if (i % 30 == 0) {
+                    if (i % 25 == 0) {
                         FilterResult anomaly = new FilterResult();
                         anomaly.setTimestamp(System.currentTimeMillis());
                         anomaly.setAnomaly(true);

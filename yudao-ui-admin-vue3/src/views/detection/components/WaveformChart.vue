@@ -51,6 +51,7 @@ const initChart = () => {
       name: '幅值',
       type: 'line',
       showSymbol: false,
+      smooth: true,
       data: props.data,
       lineStyle: { width: 1, color: props.color },
       areaStyle: { 
@@ -67,7 +68,39 @@ const initChart = () => {
 }
 
 watch(() => props.data, (newData) => {
-  chartInstance?.setOption({ series: [{ data: newData }] })
+  if (!chartInstance) return
+  const data = (newData || []) as any[]
+
+  const option: any = {
+    series: [{ data }]
+  }
+
+  if (data.length > 0) {
+    // 假设数据格式 [timestamp, value]
+    const times = data.map((d) => Number(d[0]))
+    const values = data.map((d) => Number(d[1]) || 0)
+
+    const minTime = Math.min(...times)
+    const maxTime = Math.max(...times)
+
+    // 纵轴对称、平稳：以 0 为中心，取绝对值最大值并放大一点
+    const maxAbs = Math.max(...values.map((v) => Math.abs(v))) || 1
+    const base = Math.ceil(maxAbs * 10) / 10 // 保留 1 位小数向上取整
+
+    option.xAxis = {
+      type: 'time',
+      min: minTime,
+      max: maxTime
+    }
+    option.yAxis = {
+      type: 'value',
+      min: -base,
+      max: base,
+      splitNumber: 5
+    }
+  }
+
+  chartInstance.setOption(option)
 }, { deep: false })
 
 onMounted(() => {
