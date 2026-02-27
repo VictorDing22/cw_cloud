@@ -4,78 +4,78 @@
     <el-row :gutter="20" class="mb-4">
       <el-col :xs="24" :md="12">
         <el-card shadow="never" class="upload-card">
-          <template #header>
-            <div class="flex items-center justify-between">
+      <template #header>
+        <div class="flex items-center justify-between">
               <span class="text-lg font-bold">上传 TDMS 文件</span>
-              <el-tag v-if="currentTask.filename" type="info" size="small">{{ currentTask.filename }}</el-tag>
-            </div>
-          </template>
-          <el-upload
-            class="tdms-uploader"
-            drag
-            action="#"
-            :auto-upload="false"
-            :on-change="handleFileChange"
-            accept=".tdms"
-          >
-            <Icon icon="ep:upload-filled" class="upload-icon" />
+          <el-tag v-if="currentTask.filename" type="info" size="small">{{ currentTask.filename }}</el-tag>
+        </div>
+      </template>
+      <el-upload
+        class="tdms-uploader"
+        drag
+        action="#"
+        :auto-upload="false"
+        :on-change="handleFileChange"
+        accept=".tdms"
+      >
+        <Icon icon="ep:upload-filled" class="upload-icon" />
             <div class="el-upload__text">拖拽文件到此处或 <em>点击选择</em></div>
-            <template #tip>
-              <div class="el-upload__tip text-center">仅支持 .tdms 文件</div>
-            </template>
-          </el-upload>
-        </el-card>
+        <template #tip>
+          <div class="el-upload__tip text-center">仅支持 .tdms 文件</div>
+        </template>
+      </el-upload>
+    </el-card>
       </el-col>
 
       <el-col :xs="24" :md="12">
         <el-card shadow="never" class="config-card">
-          <template #header>
+      <template #header>
             <span class="text-lg font-bold">参数配置</span>
-          </template>
-          <el-form :model="config" label-position="top" class="config-form">
-            <el-row :gutter="20">
-              <el-col :span="8">
-                <el-form-item label="滤波算法">
-                  <el-select v-model="config.algorithm" placeholder="选择算法" class="w-full">
-                    <el-option
-                      v-for="algo in algorithms"
-                      :key="algo.id"
-                      :label="`${algo.id} - ${algo.name}`"
-                      :value="algo.id"
-                    >
-                      <span style="float: left">{{ algo.id }} - {{ algo.name }}</span>
+      </template>
+      <el-form :model="config" label-position="top" class="config-form">
+        <el-row :gutter="20">
+          <el-col :span="8">
+            <el-form-item label="滤波算法">
+              <el-select v-model="config.algorithm" placeholder="选择算法" class="w-full">
+                <el-option
+                  v-for="algo in algorithms"
+                  :key="algo.id"
+                  :label="`${algo.id} - ${algo.name}`"
+                  :value="algo.id"
+                >
+                  <span style="float: left">{{ algo.id }} - {{ algo.name }}</span>
                       <span style="float: right; color: #909399; font-size: 13px; margin-left: 10px">{{ algo.desc }}</span>
-                    </el-option>
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="过程噪声 (Q)">
-                  <el-input-number v-model="config.processNoise" :precision="4" :step="0.001" class="w-full" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="测量噪声 (R)">
-                  <el-input-number v-model="config.measurementNoise" :precision="4" :step="0.01" class="w-full" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <div class="flex justify-center mt-4 gap-4">
-              <el-button type="info" plain icon="ep:setting">告警阈值配置</el-button>
-              <el-button
-                type="primary"
-                size="large"
-                :loading="processing"
-                @click="startDetection"
-                :disabled="!selectedFile"
-                class="start-btn"
-              >
-                <Icon icon="ep:video-play" class="mr-1" />
-                {{ processing ? '正在处理数据...' : '触发检测流程' }}
-              </el-button>
-            </div>
-          </el-form>
-        </el-card>
+                </el-option>
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="过程噪声 (Q)">
+              <el-input-number v-model="config.processNoise" :precision="4" :step="0.001" class="w-full" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="测量噪声 (R)">
+              <el-input-number v-model="config.measurementNoise" :precision="4" :step="0.01" class="w-full" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <div class="flex justify-center mt-4 gap-4">
+          <el-button type="info" plain icon="ep:setting">告警阈值配置</el-button>
+          <el-button 
+            type="primary" 
+            size="large"
+            :loading="processing" 
+            @click="startDetection"
+            :disabled="!selectedFile"
+            class="start-btn"
+          >
+            <Icon icon="ep:video-play" class="mr-1" />
+            {{ processing ? '正在处理数据...' : '触发检测流程' }}
+          </el-button>
+        </div>
+      </el-form>
+    </el-card>
       </el-col>
     </el-row>
 

@@ -58,7 +58,7 @@ public class DetectionController {
     @Operation(summary = "上传 TDMS 文件进行检测")
     @PermitAll
     public CommonResult<DetectionTaskVO> uploadFile(@RequestParam("file") MultipartFile file,
-                                                   @RequestParam("algorithm") String algorithm) {
+                                      @RequestParam("algorithm") String algorithm) {
         String taskId = UUID.randomUUID().toString();
         DetectionTaskVO task = new DetectionTaskVO();
         task.setId(taskId);
@@ -70,9 +70,9 @@ public class DetectionController {
         task.setSizeBytes(file.getSize());
         task.setStartTime(System.currentTimeMillis());
         task.setLastUpdateTime(task.getStartTime());
-
+        
         TASKS.put(taskId, task);
-
+        
         // 异步模拟处理逻辑
         new Thread(() -> {
             try {
@@ -91,7 +91,7 @@ public class DetectionController {
                         double speed = processedMB / seconds;
                         task.setSpeed(String.format("%.2f", speed));
                     }
-
+                    
                     // 模拟实时异常推送
                     if (i % 25 == 0) {
                         FilterResult anomaly = new FilterResult();

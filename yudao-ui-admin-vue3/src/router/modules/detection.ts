@@ -5,7 +5,7 @@ const detection: AppRouteRecordRaw = {
   component: Layout,
   name: 'Detection',
   meta: {
-    title: '故障检测',
+    title: '数据源检测',
     icon: 'ep:opportunity'
   },
   children: [
@@ -13,7 +13,7 @@ const detection: AppRouteRecordRaw = {
       path: '',
       component: () => import('@/views/detection/index.vue'),
       name: 'DetectionIndex',
-      meta: { title: '声发射检测', noCache: true, icon: 'ep:cpu' }
+      meta: { title: '数据源检测', noCache: true, icon: 'ep:cpu' }
     }
   ]
 }
