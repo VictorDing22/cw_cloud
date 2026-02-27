@@ -1,80 +1,83 @@
 <template>
-  <div class="detection-container dark-theme">
-    <!-- 1. 顶部：上传文件区 -->
-    <el-card shadow="never" class="mb-4 upload-card">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span class="text-lg font-bold">传文件</span>
-          <el-tag v-if="currentTask.filename" type="info" size="small">{{ currentTask.filename }}</el-tag>
-        </div>
-      </template>
-      <el-upload
-        class="tdms-uploader"
-        drag
-        action="#"
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        accept=".tdms"
-      >
-        <Icon icon="ep:upload-filled" class="upload-icon" />
-        <div class="el-upload__text">
-          拖拽文件到此处或 <em>点击上传</em>
-        </div>
-        <template #tip>
-          <div class="el-upload__tip text-center">仅支持 .tdms 文件</div>
-        </template>
-      </el-upload>
-    </el-card>
-
-    <!-- 2. 中间：算法配置区 -->
-    <el-card shadow="never" class="mb-4 config-card">
-      <template #header>
-        <span class="text-lg font-bold">选择滤波算法</span>
-      </template>
-      <el-form :model="config" label-position="top" class="config-form">
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <el-form-item label="滤波算法">
-              <el-select v-model="config.algorithm" placeholder="选择算法" class="w-full">
-                <el-option
-                  v-for="algo in algorithms"
-                  :key="algo.id"
-                  :label="`${algo.id} - ${algo.name}`"
-                  :value="algo.id"
-                >
-                  <span style="float: left">{{ algo.id }} - {{ algo.name }}</span>
-                  <span style="float: right; color: #8492a6; font-size: 13px; margin-left: 10px">{{ algo.desc }}</span>
-                </el-option>
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="过程噪声 (Q)">
-              <el-input-number v-model="config.processNoise" :precision="4" :step="0.001" class="w-full" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="测量噪声 (R)">
-              <el-input-number v-model="config.measurementNoise" :precision="4" :step="0.01" class="w-full" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <div class="flex justify-center mt-4 gap-4">
-          <el-button type="info" plain icon="ep:setting">告警阈值配置</el-button>
-          <el-button 
-            type="primary" 
-            size="large"
-            :loading="processing" 
-            @click="startDetection"
-            :disabled="!selectedFile"
-            class="start-btn"
+  <div class="detection-container">
+    <!-- 顶部：上传 + 配置（桌面端两列，移动端一列） -->
+    <el-row :gutter="20" class="mb-4">
+      <el-col :xs="24" :md="12">
+        <el-card shadow="never" class="upload-card">
+          <template #header>
+            <div class="flex items-center justify-between">
+              <span class="text-lg font-bold">上传 TDMS 文件</span>
+              <el-tag v-if="currentTask.filename" type="info" size="small">{{ currentTask.filename }}</el-tag>
+            </div>
+          </template>
+          <el-upload
+            class="tdms-uploader"
+            drag
+            action="#"
+            :auto-upload="false"
+            :on-change="handleFileChange"
+            accept=".tdms"
           >
-            <Icon icon="ep:video-play" class="mr-1" />
-            {{ processing ? '正在处理数据...' : '触发检测流程' }}
-          </el-button>
-        </div>
-      </el-form>
-    </el-card>
+            <Icon icon="ep:upload-filled" class="upload-icon" />
+            <div class="el-upload__text">拖拽文件到此处或 <em>点击选择</em></div>
+            <template #tip>
+              <div class="el-upload__tip text-center">仅支持 .tdms 文件</div>
+            </template>
+          </el-upload>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :md="12">
+        <el-card shadow="never" class="config-card">
+          <template #header>
+            <span class="text-lg font-bold">参数配置</span>
+          </template>
+          <el-form :model="config" label-position="top" class="config-form">
+            <el-row :gutter="20">
+              <el-col :span="8">
+                <el-form-item label="滤波算法">
+                  <el-select v-model="config.algorithm" placeholder="选择算法" class="w-full">
+                    <el-option
+                      v-for="algo in algorithms"
+                      :key="algo.id"
+                      :label="`${algo.id} - ${algo.name}`"
+                      :value="algo.id"
+                    >
+                      <span style="float: left">{{ algo.id }} - {{ algo.name }}</span>
+                      <span style="float: right; color: #909399; font-size: 13px; margin-left: 10px">{{ algo.desc }}</span>
+                    </el-option>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="过程噪声 (Q)">
+                  <el-input-number v-model="config.processNoise" :precision="4" :step="0.001" class="w-full" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="测量噪声 (R)">
+                  <el-input-number v-model="config.measurementNoise" :precision="4" :step="0.01" class="w-full" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <div class="flex justify-center mt-4 gap-4">
+              <el-button type="info" plain icon="ep:setting">告警阈值配置</el-button>
+              <el-button
+                type="primary"
+                size="large"
+                :loading="processing"
+                @click="startDetection"
+                :disabled="!selectedFile"
+                class="start-btn"
+              >
+                <Icon icon="ep:video-play" class="mr-1" />
+                {{ processing ? '正在处理数据...' : '触发检测流程' }}
+              </el-button>
+            </div>
+          </el-form>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <!-- 3. 下部：处理进度与详情 -->
     <el-card shadow="never" class="mb-4 progress-card" v-if="currentTask.id">
@@ -423,33 +426,37 @@ onUnmounted(() => {
 <style scoped>
 .detection-container {
   padding: 24px;
-  background: #0d1117;
+  background: #f5f7fa;
   min-height: calc(100vh - 84px);
-  color: #c9d1d9;
+  color: #303133;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 :deep(.el-card) {
-  background: #161b22 !important;
-  border: 1px solid #30363d !important;
-  color: #c9d1d9 !important;
+  background: #ffffff !important;
+  border: 1px solid #ebeef5 !important;
+  color: #303133 !important;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 :deep(.el-card__header) {
-  border-bottom: 1px solid #30363d !important;
-  color: #f0f6fc;
+  border-bottom: 1px solid #ebeef5 !important;
+  color: #303133;
 }
 
 /* 上传区 */
 .tdms-uploader :deep(.el-upload-dragger) {
-  background-color: #0d1117;
-  border: 2px dashed #30363d;
+  background-color: #fafafa;
+  border: 2px dashed #dcdfe6;
 }
 .tdms-uploader :deep(.el-upload-dragger:hover) {
-  border-color: #58a6ff;
+  border-color: #409eff;
 }
 .upload-icon {
   font-size: 64px;
-  color: #8b949e;
+  color: #909399;
   margin-bottom: 16px;
 }
 
@@ -464,12 +471,18 @@ onUnmounted(() => {
   padding: 20px 0;
 }
 :deep(.el-progress-bar__outer) {
-  background-color: #30363d !important;
+  background-color: #ebeef5 !important;
 }
 
 /* 回放控制 */
 .playback-slider {
   width: 300px;
+}
+
+@media (max-width: 768px) {
+  .playback-slider {
+    width: 200px;
+  }
 }
 
 /* 异常列表 */
@@ -479,15 +492,15 @@ onUnmounted(() => {
   padding: 10px;
 }
 .anomaly-content {
-  background: rgba(248, 81, 73, 0.05);
+  background: rgba(245, 108, 108, 0.06);
   padding: 12px;
   border-radius: 6px;
-  border-left: 4px solid #f85149;
+  border-left: 4px solid #f56c6c;
   transition: all 0.3s;
 }
 .new-anomaly {
-  background: rgba(248, 81, 73, 0.15);
-  box-shadow: 0 0 10px rgba(248, 81, 73, 0.3);
+  background: rgba(245, 108, 108, 0.12);
+  box-shadow: 0 0 10px rgba(245, 108, 108, 0.18);
 }
 
 /* 通用工具类 */
@@ -499,16 +512,18 @@ onUnmounted(() => {
 .h-full { height: 100%; }
 
 :deep(.el-form-item__label) {
-  color: #8b949e !important;
+  color: #606266 !important;
   font-weight: bold;
 }
 
 :deep(.el-descriptions__label) {
-  background: #0d1117 !important;
-  color: #8b949e !important;
+  background: #fafafa !important;
+  color: #606266 !important;
 }
 :deep(.el-descriptions__content) {
-  background: #161b22 !important;
-  color: #c9d1d9 !important;
+  background: #ffffff !important;
+  color: #303133 !important;
 }
 </style>
+
+

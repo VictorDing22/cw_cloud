@@ -23,21 +23,29 @@ const initChart = () => {
     backgroundColor: 'transparent',
     title: { 
       text: props.title, 
-      textStyle: { fontSize: 14, color: '#fff' },
+      textStyle: { fontSize: 14, color: '#303133' },
       left: 'center'
     },
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(0,0,0,0.7)', textStyle: { color: '#fff' } },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      borderColor: '#ebeef5',
+      borderWidth: 1,
+      textStyle: { color: '#303133' }
+    },
     xAxis: { 
       type: 'time', 
       splitLine: { show: false },
-      axisLabel: { color: '#aaa' }
+      axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisLabel: { color: '#606266' }
     },
     yAxis: { 
       type: 'value', 
       boundaryGap: [0, '100%'],
-      axisLabel: { color: '#aaa' },
-      splitLine: { lineStyle: { color: '#333' } }
+      axisLine: { show: false },
+      axisLabel: { color: '#606266' },
+      splitLine: { lineStyle: { color: '#ebeef5' } }
     },
     series: [{
       name: '幅值',

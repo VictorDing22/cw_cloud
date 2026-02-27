@@ -6,7 +6,12 @@ import cn.iocoder.yudao.module.detection.logic.dto.FilterResult;
 import cn.iocoder.yudao.module.detection.websocket.DetectionWebSocketHandler;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
@@ -17,6 +22,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * 注意：本项目会对 admin 包下的 Controller 自动加上全局前缀 /admin-api
+ * 因此这里不要再手动写 /admin-api，避免出现 /admin-api/admin-api 的双前缀。
+ */
 @Tag(name = "管理后台 - 实时检测")
 @RestController
 @RequestMapping("/detection/realtime")
@@ -28,7 +37,7 @@ public class DetectionController {
     private DetectionWebSocketHandler webSocketHandler;
 
     @GetMapping("/results")
-    @Operation(summary = "获取任务结果 (模拟从 TDengine 获取)")
+    @Operation(summary = "获取任务结果（模拟从 TDengine 获取）")
     @PermitAll
     public CommonResult<List<FilterResult>> getTaskResults(@RequestParam("taskId") String taskId) {
         List<FilterResult> results = new ArrayList<>();
@@ -49,7 +58,7 @@ public class DetectionController {
     @Operation(summary = "上传 TDMS 文件进行检测")
     @PermitAll
     public CommonResult<DetectionTaskVO> uploadFile(@RequestParam("file") MultipartFile file,
-                                      @RequestParam("algorithm") String algorithm) {
+                                                   @RequestParam("algorithm") String algorithm) {
         String taskId = UUID.randomUUID().toString();
         DetectionTaskVO task = new DetectionTaskVO();
         task.setId(taskId);
@@ -58,16 +67,16 @@ public class DetectionController {
         task.setStatus("PROCESSING");
         task.setProgress(0);
         task.setSize(String.format("%.2f MB", file.getSize() / 1024.0 / 1024.0));
-        
+
         TASKS.put(taskId, task);
-        
+
         // 异步模拟处理逻辑
         new Thread(() -> {
             try {
                 for (int i = 0; i <= 100; i += 10) {
                     Thread.sleep(1000);
                     task.setProgress(i);
-                    
+
                     // 模拟实时异常推送
                     if (i % 30 == 0) {
                         FilterResult anomaly = new FilterResult();
@@ -96,7 +105,7 @@ public class DetectionController {
     }
 
     @PostMapping("/push")
-    @Operation(summary = "推送检测结果 (供 Flink 调用)")
+    @Operation(summary = "推送检测结果（供 Flink 调用）")
     @PermitAll
     public CommonResult<Boolean> pushResult(@RequestBody FilterResult result) {
         webSocketHandler.broadcast(result);
