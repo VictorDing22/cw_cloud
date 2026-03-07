@@ -133,6 +133,33 @@ services:
     networks:
       - yudao-network
 
+  # Detection 检测服务
+  detection-server:
+    build:
+      context: .
+      dockerfile: yudao-module-detection/yudao-module-detection-server/Dockerfile
+    container_name: yudao-detection-server
+    restart: always
+    ports:
+      - "48083:48083"
+      - "9090:9090"
+      - "9999:9999"
+      - "9998:9998"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ruoyi-vue-pro?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 20041102
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+    depends_on:
+      - mysql
+      - redis
+      - nacos
+    networks:
+      - yudao-network
+
   # Filter 滤波器服务 (新增) - 暂时注释，后续添加
   # filter-server:
   #   build:

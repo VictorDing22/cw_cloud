@@ -110,10 +110,8 @@
       </div>
     </el-card>
 
-    <!-- 4. 可视化：波形展示（支持回放）与 异常信息 -->
-    <el-row :gutter="20">
-      <el-col :span="16">
-        <el-card shadow="never" class="viz-card h-full">
+    <!-- 4. 可视化：异常监测告警（横向条状）和波形展示 -->
+    <el-card shadow="never" class="viz-card">
           <template #header>
             <div class="flex justify-between items-center">
               <span class="text-lg font-bold">面向客户展示：时序数据库信号回放</span>
@@ -134,56 +132,58 @@
               </div>
             </div>
           </template>
-          <div class="charts-container">
-            <WaveformChart :data="displayRaw" title="原始声发射信号 (TDengine)" height="250px" color="#909399" />
-            <div class="h-4"></div>
-            <WaveformChart :data="displayFiltered" title="滤波后平滑信号" height="250px" color="#409EFF" />
+      
+      <!-- 实时异常监测告警 - 横向条状 -->
+      <div class="anomaly-bar-container mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-base font-bold">实时异常监测告警</span>
+          <el-badge :value="anomalies.length" type="danger" v-if="anomalies.length > 0" />
+        </div>
+        <div class="anomaly-bar-wrapper">
+          <div v-if="anomalies.length === 0" class="anomaly-empty">
+            <el-empty description="监测中，暂无异常数据" :image-size="80" />
           </div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="never" class="anomaly-card h-full">
-          <template #header>
-            <div class="flex justify-between items-center">
-              <span class="text-lg font-bold">实时异常监测告警</span>
-              <el-badge :value="anomalies.length" type="danger" v-if="anomalies.length > 0" />
-            </div>
-          </template>
-          <div class="anomaly-list">
-            <el-timeline>
-              <el-timeline-item
-                v-for="(item, index) in anomalies"
+          <div v-else class="anomaly-bar-list">
+            <div
+              v-for="(item, index) in anomalies.slice(0, 10)"
                 :key="index"
-                :timestamp="formatTime(item.timestamp)"
-                :type="item.severity === 'high' ? 'danger' : 'warning'"
-                :hollow="index > 0"
+              class="anomaly-bar-item"
+              :class="{ 'new-anomaly': index === 0 }"
               >
-                <div class="anomaly-content" :class="{ 'new-anomaly': index === 0 }">
-                  <div class="flex justify-between items-center">
-                    <span class="font-bold">能量异常告警</span>
-                    <el-tag size="mini" :type="item.severity === 'high' ? 'danger' : 'warning'">{{ item.severity.toUpperCase() }}</el-tag>
-                  </div>
-                  <div class="mt-2 text-sm">
-                    能量值: <span class="text-red-400 font-mono">{{ item.energy.toFixed(2) }}</span>
-                  </div>
-                  <div class="text-xs text-gray-500 mt-1">
-                    监测数值: {{ item.value.toFixed(4) }}
-                  </div>
+              <div class="anomaly-bar-content">
+                <div class="flex items-center gap-3">
+                  <el-tag size="small" :type="item.severity === 'high' ? 'danger' : 'warning'">
+                    {{ item.severity === 'high' ? '高危' : '中危' }}
+                  </el-tag>
+                  <span class="anomaly-time">{{ formatTime(item.timestamp) }}</span>
+                  <span class="anomaly-label">能量异常告警</span>
+                  <span class="anomaly-value">能量值: <strong>{{ item.energy.toFixed(2) }}</strong></span>
+                  <span class="anomaly-value">监测值: <strong>{{ item.value.toFixed(4) }}</strong></span>
                 </div>
-              </el-timeline-item>
-            </el-timeline>
-            <el-empty v-if="anomalies.length === 0" description="监测中，暂无异常数据" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 波形图展示 -->
+      <div class="charts-container">
+        <AdvancedWaveformChart 
+          :original-data="displayRaw" 
+          :filtered-data="displayFiltered" 
+          :start-index="displayStartIndex"
+          :accumulated-original-data="accumulatedRaw"
+          :accumulated-filtered-data="accumulatedFiltered"
+        />
           </div>
         </el-card>
-      </el-col>
-    </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { Icon } from '@iconify/vue'
-import WaveformChart from './components/WaveformChart.vue'
+import AdvancedWaveformChart from './components/AdvancedWaveformChart.vue'
 import dayjs from 'dayjs'
 import { useMessage } from '@/hooks/web/useMessage'
 import { DetectionApi } from '@/api/monitor/detection'
@@ -262,7 +262,14 @@ const allFilteredData = ref<any[]>([])
 // 当前显示的切片数据（用于回放）
 const displayRaw = ref<any[]>([])
 const displayFiltered = ref<any[]>([])
+const displayStartIndex = ref(0)
+// 累计数据（用于“随播放逐步增长”的误差分布/直方图）
+const accumulatedRaw = ref<any[]>([])
+const accumulatedFiltered = ref<any[]>([])
 const anomalies = ref<any[]>([])
+
+// 节流累计数据更新，避免每 50ms slice 大数组导致 UI 更新被拖到“最后一刻”
+let lastAccumulateUpdateMs = 0
 
 const progressColors = [
   { color: '#f56c6c', percentage: 20 },
@@ -410,12 +417,24 @@ const onPlaybackChange = () => {
 }
 
 const updateDisplayData = () => {
-  const windowSize = 100 
+  // 时域显示窗口：太小会看起来“全图没数据”（尤其是信号变化不快时）
+  // 放大窗口并在图表侧做下采样，保证“满屏有波形”且不卡顿
+  const windowSize = 1000
   const end = playbackIndex.value
   const start = Math.max(0, end - windowSize)
   
   displayRaw.value = allRawData.value.slice(start, end)
   displayFiltered.value = allFilteredData.value.slice(start, end)
+  displayStartIndex.value = start
+
+  // 累计到当前播放进度（让直方图/误差分布“慢慢增长”，而不是最后一秒才跳）
+  const now = Date.now()
+  // 每 200ms 更新一次累计数据即可肉眼平滑增长
+  if (now - lastAccumulateUpdateMs > 200 || end >= totalPoints.value) {
+    accumulatedRaw.value = allRawData.value.slice(0, end)
+    accumulatedFiltered.value = allFilteredData.value.slice(0, end)
+    lastAccumulateUpdateMs = now
+  }
 }
 
 const formatTime = (ts: number) => dayjs(ts).format('HH:mm:ss.SSS')
@@ -488,22 +507,84 @@ onUnmounted(() => {
   }
 }
 
-/* 异常列表 */
-.anomaly-list {
-  height: 520px;
-  overflow-y: auto;
-  padding: 10px;
+/* 异常监测告警 - 横向条状 */
+.anomaly-bar-container {
+  background: #f5f7fa;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
 }
-.anomaly-content {
-  background: rgba(245, 108, 108, 0.06);
-  padding: 12px;
+
+.anomaly-bar-wrapper {
+  width: 100%;
+}
+
+.anomaly-empty {
+  padding: 20px;
+  text-align: center;
+}
+
+.anomaly-bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.anomaly-bar-item {
+  background: #ffffff;
+  border: 1px solid #ebeef5;
   border-radius: 6px;
-  border-left: 4px solid #f56c6c;
+  padding: 12px 16px;
   transition: all 0.3s;
 }
-.new-anomaly {
-  background: rgba(245, 108, 108, 0.12);
-  box-shadow: 0 0 10px rgba(245, 108, 108, 0.18);
+
+.anomaly-bar-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.anomaly-bar-item.new-anomaly {
+  background: rgba(245, 108, 108, 0.08);
+  border-color: #f56c6c;
+  border-left-width: 4px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 108, 108, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(245, 108, 108, 0);
+  }
+}
+
+.anomaly-bar-content {
+  width: 100%;
+}
+
+.anomaly-time {
+  color: #909399;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.anomaly-label {
+  color: #303133;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.anomaly-value {
+  color: #606266;
+  font-size: 13px;
+  margin-left: 16px;
+}
+
+.anomaly-value strong {
+  color: #f56c6c;
+  font-weight: 600;
 }
 
 /* 通用工具类 */

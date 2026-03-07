@@ -1,16 +1,31 @@
-# 使用 OpenJDK 11 镜像（根据要求）
-FROM openjdk:11-jre-slim
+# 使用官方 OpenJDK 17 作为基础镜像
+FROM openjdk:17-jdk-slim
 
+# 设置工作目录
 WORKDIR /app
 
-# 复制构建好的 JAR 文件
-COPY target/yudao-module-detection-server-*.jar /app/app.jar
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 复制Maven构建的jar包
+COPY yudao-module-detection/yudao-module-detection-server/target/yudao-module-detection-server-*.jar app.jar
+
+# 创建日志目录
+RUN mkdir -p /app/logs
 
 # 暴露端口
+EXPOSE 48083
 EXPOSE 9090
-EXPOSE 48080
 EXPOSE 9999
 EXPOSE 9998
 
+# 设置JVM参数
+ENV JAVA_OPTS="-Xms512m -Xmx1024m -Djava.security.egd=file:/dev/./urandom"
+
 # 启动应用
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:48083/actuator/health || exit 1
