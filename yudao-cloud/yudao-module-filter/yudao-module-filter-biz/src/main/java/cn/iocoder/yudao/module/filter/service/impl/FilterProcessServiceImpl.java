@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.filter.service.impl;
 
 import cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil;
+import cn.iocoder.yudao.framework.common.exception.enums.GlobalErrorCodeConstants;
 import cn.iocoder.yudao.module.filter.api.algorithm.AdaptiveFilter;
 import cn.iocoder.yudao.module.filter.algorithm.impl.LMSFilter;
 import cn.iocoder.yudao.module.filter.algorithm.impl.NLMSFilter;
@@ -55,10 +56,11 @@ public class FilterProcessServiceImpl implements FilterProcessService {
                     reqVO.getFilterType(), reqVO.getInputSignal().length, outputSignal.length);
             
             return respVO;
-            
+
         } catch (Exception e) {
             log.error("信号处理失败", e);
-            throw ServiceExceptionUtil.exception(500, "信号处理失败: " + e.getMessage());
+            throw ServiceExceptionUtil.exception(GlobalErrorCodeConstants.INTERNAL_SERVER_ERROR,
+                    "信号处理失败: " + e.getMessage());
         }
     }
     

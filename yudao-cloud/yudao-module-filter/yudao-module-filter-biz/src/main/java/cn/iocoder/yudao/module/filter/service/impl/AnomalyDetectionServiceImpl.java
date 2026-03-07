@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Comparator;
 
 /**
  * 异常检测服务实现
@@ -319,10 +320,10 @@ public class AnomalyDetectionServiceImpl implements AnomalyDetectionService {
 
         respVO.setHasAnomaly(true);
         
-        // 找到最高严重级别
+        // 找到最高严重级别（按权重比较）
         AlertLevel maxLevel = respVO.getAnomalyList().stream()
             .map(AnomalyDetectionRespVO.AnomalyDetail::getSeverity)
-            .max(AlertLevel::compareTo)
+            .max(Comparator.comparing(AlertLevel::getWeight))
             .orElse(AlertLevel.INFO);
             
         respVO.setAlertLevel(maxLevel);

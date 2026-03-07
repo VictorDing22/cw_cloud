@@ -1,7 +1,6 @@
 package cn.iocoder.yudao.module.filter.controller.admin;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
-import cn.iocoder.yudao.framework.operatelog.core.annotations.OperateLog;
 import cn.iocoder.yudao.module.filter.controller.admin.vo.FilterProcessReqVO;
 import cn.iocoder.yudao.module.filter.controller.admin.vo.FilterProcessRespVO;
 import cn.iocoder.yudao.module.filter.service.FilterProcessService;
@@ -9,7 +8,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,7 +15,6 @@ import javax.annotation.Resource;
 import javax.validation.Valid;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
-import static cn.iocoder.yudao.framework.operatelog.core.enums.OperateTypeEnum.OTHER;
 
 /**
  * 管理后台 - 自适应滤波器处理
@@ -36,8 +33,6 @@ public class FilterProcessController {
 
     @PostMapping("/process")
     @Operation(summary = "处理信号数据")
-    @PreAuthorize("@ss.hasPermission('filter:adaptive:process')")
-    @OperateLog(type = OTHER, content = "处理信号数据")
     public CommonResult<FilterProcessRespVO> processSignal(@Valid @RequestBody FilterProcessReqVO reqVO) {
         FilterProcessRespVO respVO = filterProcessService.processSignal(reqVO);
         return success(respVO);
@@ -45,7 +40,6 @@ public class FilterProcessController {
 
     @GetMapping("/info")
     @Operation(summary = "获取滤波器配置信息")
-    @PreAuthorize("@ss.hasPermission('filter:adaptive:query')")
     public CommonResult<String> getFilterInfo(@Parameter(description = "滤波器类型") @RequestParam String filterType) {
         String info = filterProcessService.getFilterInfo(filterType);
         return success(info);
@@ -53,8 +47,6 @@ public class FilterProcessController {
 
     @PostMapping("/reset")
     @Operation(summary = "重置滤波器")
-    @PreAuthorize("@ss.hasPermission('filter:adaptive:reset')")
-    @OperateLog(type = OTHER, content = "重置滤波器")
     public CommonResult<Boolean> resetFilter(@Parameter(description = "滤波器类型") @RequestParam String filterType) {
         filterProcessService.resetFilter(filterType);
         return success(true);
@@ -62,7 +54,6 @@ public class FilterProcessController {
 
     @PostMapping("/test")
     @Operation(summary = "测试滤波器功能")
-    @PreAuthorize("@ss.hasPermission('filter:adaptive:test')")
     public CommonResult<FilterProcessRespVO> testFilter(@RequestParam(defaultValue = "LMS") String filterType) {
         // 生成测试数据
         FilterProcessReqVO reqVO = new FilterProcessReqVO();

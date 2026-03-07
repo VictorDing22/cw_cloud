@@ -31,13 +31,6 @@ public enum AlertLevel {
      * 级别权重（用于比较）
      */
     private final Integer weight;
-
-    /**
-     * 比较方法
-     */
-    public int compareTo(AlertLevel other) {
-        return this.weight.compareTo(other.weight);
-    }
 }
 
 

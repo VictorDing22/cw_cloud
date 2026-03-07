@@ -1,0 +1,44 @@
+2026-03-07 20:42:53.432 [main] INFO  com.alibaba.nacos.client.env.SearchableProperties:197 - properties search order:PROPERTIES->JVM->ENV->DEFAULT_SETTING
+2026-03-07 20:42:53.576 [background-preinit] INFO  org.hibernate.validator.internal.util.Version:21 - HV000001: Hibernate Validator 6.2.5.Final
+2026-03-07 20:42:53.662 [main] INFO  cn.iocoder.yudao.server.YudaoServerApplication:55 - Starting YudaoServerApplication using Java 21.0.9 on 西宫硝子 with PID 32244 (D:\CW_Cloud-main\yudao-cloud\yudao-server\target\yudao-server.jar started by 17371 in D:\CW_Cloud-main\yudao-cloud)
+2026-03-07 20:42:53.663 [main] INFO  cn.iocoder.yudao.server.YudaoServerApplication:638 - The following 1 profile is active: "local"
+2026-03-07 20:42:56.664 [main] WARN  org.mybatis.spring.mapper.ClassPathMapperScanner:44 - No MyBatis mapper was found in '[cn.iocoder.yudao]' package. Please check your configuration.
+2026-03-07 20:42:56.896 [main] INFO  o.springframework.cloud.context.scope.GenericScope:283 - BeanFactory id=1923f11c-16f7-341a-ba26-060d735c2372
+2026-03-07 20:42:57.096 [main] INFO  c.g.y.a.MybatisPlusJoinAutoConfiguration:141 - MPJ SqlSessionFactory bean definition: sqlSessionFactory factoryBeanName: com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration factoryMethodName: sqlSessionFactory source: com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration.sqlSessionFactory(javax.sql.DataSource)
+2026-03-07 20:42:57.506 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'org.springframework.cloud.commons.config.CommonsConfigAutoConfiguration' of type [org.springframework.cloud.commons.config.CommonsConfigAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:57.520 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration' of type [org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:57.523 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'loadBalancerClientsDefaultsMappingsProvider' of type [org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration$$Lambda/0x0000023a314b3250] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:57.541 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'defaultsBindHandlerAdvisor' of type [org.springframework.cloud.commons.config.DefaultsBindHandlerAdvisor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:57.738 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'com.mzt.logapi.starter.configuration.LogRecordProxyAutoConfiguration' of type [com.mzt.logapi.starter.configuration.LogRecordProxyAutoConfiguration$$EnhancerBySpringCGLIB$$e706aba4] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:57.763 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'mzt.log.record-com.mzt.logapi.starter.configuration.LogRecordProperties' of type [com.mzt.logapi.starter.configuration.LogRecordProperties] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:57.797 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'logRecordPerformanceMonitor' of type [com.mzt.logapi.service.impl.DefaultLogRecordPerformanceMonitor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:58.313 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'cn.iocoder.yudao.framework.datapermission.config.YudaoDataPermissionAutoConfiguration' of type [cn.iocoder.yudao.framework.datapermission.config.YudaoDataPermissionAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:58.321 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'dataPermissionAnnotationAdvisor' of type [cn.iocoder.yudao.framework.datapermission.core.aop.DataPermissionAnnotationAdvisor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:58.389 [main] INFO  o.s.c.s.PostProcessorRegistrationDelegate$BeanPostProcessorChecker:376 - Bean 'cn.iocoder.yudao.framework.quartz.config.YudaoAsyncAutoConfiguration' of type [cn.iocoder.yudao.framework.quartz.config.YudaoAsyncAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2026-03-07 20:42:59.200 [main] INFO  o.s.boot.web.embedded.tomcat.TomcatWebServer:108 - Tomcat initialized with port(s): 8080 (http)
+2026-03-07 20:42:59.211 [main] INFO  org.apache.coyote.http11.Http11NioProtocol:173 - Initializing ProtocolHandler ["http-nio-8080"]
+2026-03-07 20:42:59.216 [main] INFO  org.apache.catalina.core.StandardService:173 - Starting service [Tomcat]
+2026-03-07 20:42:59.217 [main] INFO  org.apache.catalina.core.StandardEngine:173 - Starting Servlet engine: [Apache Tomcat/9.0.83]
+2026-03-07 20:42:59.364 [main] INFO  o.a.c.core.ContainerBase.[Tomcat].[localhost].[/]:173 - Initializing Spring embedded WebApplicationContext
+2026-03-07 20:42:59.365 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext:292 - Root WebApplicationContext: initialization completed in 5249 ms
+2026-03-07 20:42:59.598 [main] ERROR o.s.boot.web.embedded.tomcat.TomcatStarter:61 - Error starting Tomcat context. Exception: org.springframework.beans.factory.UnsatisfiedDependencyException. Message: Error creating bean with name 'apiAccessLogFilter' defined in class path resource [cn/iocoder/yudao/framework/apilog/config/YudaoApiLogAutoConfiguration.class]: Unsatisfied dependency expressed through method 'apiAccessLogFilter' parameter 2; nested exception is org.springframework.beans.factory.NoSuchBeanDefinitionException: No qualifying bean of type 'cn.iocoder.yudao.framework.common.biz.infra.logger.ApiAccessLogCommonApi' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+2026-03-07 20:42:59.656 [main] INFO  org.apache.catalina.core.StandardService:173 - Stopping service [Tomcat]
+2026-03-07 20:42:59.986 [main] WARN  o.s.b.w.s.c.AnnotationConfigServletWebServerApplicationContext:599 - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Unable to start web server; nested exception is org.springframework.boot.web.server.WebServerException: Unable to start embedded Tomcat
+2026-03-07 20:43:00.018 [main] INFO  o.s.b.a.l.ConditionEvaluationReportLoggingListener:136 - 
+
+Error starting ApplicationContext. To display the conditions report re-run your application with 'debug' enabled.
+2026-03-07 20:43:00.155 [main] ERROR o.s.b.diagnostics.LoggingFailureAnalysisReporter:40 - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 2 of method apiAccessLogFilter in cn.iocoder.yudao.framework.apilog.config.YudaoApiLogAutoConfiguration required a bean of type 'cn.iocoder.yudao.framework.common.biz.infra.logger.ApiAccessLogCommonApi' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'cn.iocoder.yudao.framework.common.biz.infra.logger.ApiAccessLogCommonApi' in your configuration.
+
