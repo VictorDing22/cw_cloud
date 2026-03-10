@@ -15,6 +15,8 @@ import java.util.List;
 public class FastTdmsParser {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static volatile File cachedScriptFile;
+    private static final int BUFFER_SIZE = 64 * 1024; // 64KB缓冲区
 
     @Data
     public static class FastParsedData {
@@ -25,7 +27,7 @@ public class FastTdmsParser {
     }
 
     public static FastParsedData parse(File tdmsFile) throws IOException {
-        File scriptFile = createPythonScript();
+        File scriptFile = getOrCreateScript();
         try {
             ProcessBuilder pb = new ProcessBuilder("python", "-X", "utf8",
                     scriptFile.getAbsolutePath(), tdmsFile.getAbsolutePath());
@@ -37,31 +39,34 @@ public class FastTdmsParser {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("解析被中断", e);
-        } finally {
-            if (scriptFile.exists()) {
-                scriptFile.delete();
-            }
         }
+        // 不再删除脚本文件，保持缓存
+    }
+    
+    /**
+     * 获取或创建缓存的Python脚本
+     */
+    private static synchronized File getOrCreateScript() throws IOException {
+        if (cachedScriptFile == null || !cachedScriptFile.exists()) {
+            cachedScriptFile = createPythonScript();
+            // 标记为程序退出时删除
+            cachedScriptFile.deleteOnExit();
+            }
+        return cachedScriptFile;
     }
 
-    private static FastParsedData readProcessOutput(Process process, File tdmsFile) throws IOException, InterruptedException {
-        InputStream in = process.getInputStream();
+    static FastParsedData readProcessOutput(Process process, File tdmsFile) throws IOException, InterruptedException {
+        // 使用更大的缓冲区提升I/O性能
+        BufferedInputStream bufferedIn = new BufferedInputStream(process.getInputStream(), BUFFER_SIZE);
         
-        // 1. 读取元数据行
-        ByteArrayOutputStream lineBuffer = new ByteArrayOutputStream();
-        int b;
-        while ((b = in.read()) != -1) {
-            if (b == '\n') {
-                break;
-            }
-            lineBuffer.write(b);
-        }
+        // 1. 读取元数据行（优化：使用BufferedReader提升读取效率）
+        BufferedReader reader = new BufferedReader(new InputStreamReader(bufferedIn, StandardCharsets.UTF_8), BUFFER_SIZE);
+        String metaJson = reader.readLine();
         
-        if (lineBuffer.size() == 0) {
+        if (metaJson == null || metaJson.isEmpty()) {
             throw new IOException("Python 输出为空");
         }
         
-        String metaJson = lineBuffer.toString(StandardCharsets.UTF_8.name());
         JsonNode meta = objectMapper.readTree(metaJson);
         
         String channelName = meta.get("name").asText();
@@ -69,26 +74,46 @@ public class FastTdmsParser {
         long startTimestamp = meta.get("startTimestamp").asLong();
         int count = meta.get("count").asInt();
 
-        // 2. 读取二进制 Double 数组
-        // data.tofile() 输出的是机器字节序，通常是 Little Endian (Intel)。
-        // Java DataInputStream 是 Big Endian。需要转换。
-        // 或者让 Python 输出 Big Endian: data.astype('>f8').tofile(...)
+        // 2. 读取二进制 Double 数组（使用更大的缓冲区和批量读取优化）
+        DataInputStream dis = new DataInputStream(new BufferedInputStream(bufferedIn, BUFFER_SIZE));
         
+        // 预分配列表容量，减少扩容开销
         List<TdmsSample> samples = new ArrayList<>(count);
-        DataInputStream dis = new DataInputStream(new BufferedInputStream(in));
         
-        // 假设 Python 端输出了 Big Endian 的 double
-        for (int i = 0; i < count; i++) {
-            try {
-                double value = dis.readDouble();
-                // 计算时间戳: start + i * (1000 / rate)
-                // 注意 sampleRate 是 Hz (每秒点数)
-                // 间隔 ms = 1000.0 / sampleRate
-                long ts = startTimestamp + (long) (i * 1000.0 / sampleRate);
-                samples.add(new TdmsSample(ts, value, channelName));
-            } catch (EOFException e) {
+        // 批量读取优化：一次读取多个double值
+        byte[] buffer = new byte[8 * Math.min(1024, count)]; // 每次最多读取1024个double
+        int remaining = count;
+        int index = 0;
+        
+        while (remaining > 0) {
+            int batchSize = Math.min(buffer.length / 8, remaining);
+            int bytesToRead = batchSize * 8;
+            
+            int bytesRead = dis.read(buffer, 0, bytesToRead);
+            if (bytesRead == -1) {
                 break;
             }
+            
+            // 处理读取到的数据（Big Endian格式）
+            int doublesRead = bytesRead / 8;
+            for (int i = 0; i < doublesRead; i++) {
+                long bits = ((long)(buffer[i*8] & 0xFF) << 56) |
+                           ((long)(buffer[i*8+1] & 0xFF) << 48) |
+                           ((long)(buffer[i*8+2] & 0xFF) << 40) |
+                           ((long)(buffer[i*8+3] & 0xFF) << 32) |
+                           ((long)(buffer[i*8+4] & 0xFF) << 24) |
+                           ((long)(buffer[i*8+5] & 0xFF) << 16) |
+                           ((long)(buffer[i*8+6] & 0xFF) << 8) |
+                           ((long)(buffer[i*8+7] & 0xFF));
+                double value = Double.longBitsToDouble(bits);
+                
+                // 计算时间戳: start + i * (1000 / rate)
+                long ts = startTimestamp + (long) (index * 1000.0 / sampleRate);
+                samples.add(new TdmsSample(ts, value, channelName));
+                index++;
+            }
+            
+            remaining -= doublesRead;
         }
         
         int exitCode = process.waitFor();
@@ -98,8 +123,8 @@ public class FastTdmsParser {
 
         FastParsedData result = new FastParsedData();
         result.setChannelName(channelName);
-        result.setSampleRate(sampleRate);
         result.setStartTimestamp(startTimestamp);
+        result.setSampleRate(sampleRate);
         result.setSamples(samples);
         return result;
     }

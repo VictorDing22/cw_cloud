@@ -187,24 +187,94 @@ public class FilterFactory {
     }
 
     /**
-     * 6. Median Filter
+     * 6. Median Filter (优化：使用部分排序替代全排序)
      */
     public static class MedianFilter implements FilterStrategy {
         private final int windowSize;
         private final Deque<Double> window = new ArrayDeque<>();
+        private final double[] sortedArray; // 缓存排序数组
+        private boolean needsSort = true;
 
-        public MedianFilter(int size) { this.windowSize = size; }
+        public MedianFilter(int size) { 
+            this.windowSize = size;
+            this.sortedArray = new double[size];
+        }
 
         @Override
         public double filter(double value, long timestamp) {
             window.addLast(value);
             if (window.size() > windowSize) {
                 window.removeFirst();
+                needsSort = true; // 窗口变化需要重新排序
+            } else if (window.size() == windowSize) {
+                needsSort = true;
             }
-            List<Double> sorted = new ArrayList<>(window);
-            Collections.sort(sorted);
-            return sorted.get(sorted.size() / 2);
+            
+            // 优化：只在需要时排序，使用部分排序（快速选择算法）找中位数
+            if (needsSort && window.size() >= 2) {
+                int size = window.size();
+                int i = 0;
+                for (Double v : window) {
+                    sortedArray[i++] = v;
+                }
+                // 使用快速选择算法找中位数，平均O(n)，最坏O(n^2)
+                // 对于小窗口，直接排序更快
+                if (size <= 20) {
+                    Arrays.sort(sortedArray, 0, size);
+                } else {
+                    // 快速选择：找到第size/2小的元素
+                    quickSelect(sortedArray, 0, size - 1, size / 2);
+                    // 确保中位数左侧已排序（简化版）
+                    Arrays.sort(sortedArray, 0, size / 2 + 1);
+                }
+                needsSort = false;
+            }
+            
+            int size = window.size();
+            if (size == 0) return value;
+            if (size == 1) return window.peekFirst();
+            
+            // 如果窗口未满，需要临时排序
+            if (needsSort) {
+                int i = 0;
+                for (Double v : window) {
+                    sortedArray[i++] = v;
+                }
+                Arrays.sort(sortedArray, 0, size);
+            }
+            
+            return sortedArray[size / 2];
         }
+        
+        // 快速选择算法（找第k小的元素）
+        private void quickSelect(double[] arr, int left, int right, int k) {
+            if (left >= right) return;
+            int pivotIndex = partition(arr, left, right);
+            if (pivotIndex == k) return;
+            if (pivotIndex > k) {
+                quickSelect(arr, left, pivotIndex - 1, k);
+            } else {
+                quickSelect(arr, pivotIndex + 1, right, k);
+            }
+        }
+        
+        private int partition(double[] arr, int left, int right) {
+            double pivot = arr[right];
+            int i = left;
+            for (int j = left; j < right; j++) {
+                if (arr[j] <= pivot) {
+                    double temp = arr[i];
+                    arr[i] = arr[j];
+                    arr[j] = temp;
+                    i++;
+        }
+            }
+            double temp = arr[i];
+            arr[i] = arr[right];
+            arr[right] = temp;
+            return i;
+        }
+        
         @Override public String getName() { return "Median"; }
     }
 
