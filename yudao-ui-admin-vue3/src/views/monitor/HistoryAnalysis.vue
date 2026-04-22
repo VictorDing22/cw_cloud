@@ -262,7 +262,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
-import { UploadFile, UploadRequestOptions } from 'element-plus/es/components/upload'
+import type { UploadFile, UploadRequestOptions } from 'element-plus'
 import { analyzeTdmsHistory, type HistoryAnalysisResult, type FilterType, type KalmanParams } from '@/api/monitor'
 import { UploadFilled, VideoPlay, VideoPause, QuestionFilled, Warning, Download } from '@element-plus/icons-vue'
 
