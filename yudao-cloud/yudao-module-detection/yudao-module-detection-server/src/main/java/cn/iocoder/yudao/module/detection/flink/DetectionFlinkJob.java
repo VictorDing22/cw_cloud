@@ -19,7 +19,7 @@ public class DetectionFlinkJob {
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         
-        String host = args.length > 0 ? args[0] : "yudao-module-detection-server-svc";
+        String host = args.length > 0 ? args[0] : "127.0.0.1";
         int port = args.length > 1 ? Integer.parseInt(args[1]) : 9998;
 
         // 1. Source: 从 Netty 数据端口获取数据 (TCP Client)

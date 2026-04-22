@@ -35,7 +35,7 @@ public class TDengineSink {
                         .withMaxRetries(5)
                         .build(),
                 new JdbcConnectionOptions.JdbcConnectionOptionsBuilder()
-                        .withUrl("jdbc:TAOS://tdengine-service:6030/yudao_detection")
+                        .withUrl("jdbc:TAOS://127.0.0.1:6030/yudao_detection")
                         .withDriverName("com.taosdata.jdbc.TSDBDriver")
                         .withUsername("root")
                         .withPassword("taosdata")

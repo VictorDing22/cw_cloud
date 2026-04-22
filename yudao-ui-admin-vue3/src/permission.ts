@@ -58,6 +58,20 @@ const whiteList = [
 
 // 路由加载前
 router.beforeEach(async (to, from, next) => {
+  // 兼容地址里出现双斜杠（例如：//detection），避免直接命中 404
+  if (to.path.includes('//')) {
+    const normalizedPath = to.path.replace(/\/{2,}/g, '/')
+    if (normalizedPath !== to.path) {
+      next({
+        path: normalizedPath,
+        query: to.query,
+        hash: to.hash,
+        replace: true
+      })
+      return
+    }
+  }
+
   start()
   loadStart()
   if (getAccessToken()) {

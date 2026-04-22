@@ -1,6 +1,6 @@
 -- TDengine 初始化脚本
 -- 创建数据库
-CREATE DATABASE IF NOT EXISTS yudao_detection KEEP 365 DAYS 10;
+CREATE DATABASE IF NOT EXISTS yudao_detection KEEP 365 DURATION 10;
 
 USE yudao_detection;
 

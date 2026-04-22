@@ -1,0 +1,42 @@
+# 本地开发用：Nacos + Zookeeper + Kafka（与 start.bat 配套）
+# 使用：docker compose -f scripts/docker-middleware.yml up -d
+name: cw-cloud-middleware
+
+services:
+  nacos:
+    image: nacos/nacos-server:v2.2.3
+    container_name: cw-cloud-nacos
+    restart: unless-stopped
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    environment:
+      MODE: standalone
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      # 关闭鉴权，与芋道 application-dev 中空账号一致，便于本地一键启动
+      NACOS_AUTH_ENABLE: "false"
+
+  zookeeper:
+    image: docker.io/bitnami/zookeeper:3.9.2
+    container_name: cw-cloud-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+
+  kafka:
+    image: docker.io/bitnami/kafka:3.6.2
+    container_name: cw-cloud-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    depends_on:
+      - zookeeper

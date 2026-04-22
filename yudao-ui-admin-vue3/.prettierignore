@@ -4,6 +4,7 @@
 /public/*
 /docs/*
 /vite.config.ts
+/vite.config.mts
 /src/types/env.d.ts
 /src/types/auto-components.d.ts
 /src/types/auto-imports.d.ts

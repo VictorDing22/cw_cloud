@@ -41,4 +41,4 @@ yudao:
     anomaly-threshold: 3.0
     tdengine-batch-size: 1000
     tdengine-batch-interval: 200
-    tdengine-url: jdbc:TAOS://tdengine-service:6030/yudao_detection
+    tdengine-url: jdbc:TAOS-RS://127.0.0.1:6041/yudao_detection
