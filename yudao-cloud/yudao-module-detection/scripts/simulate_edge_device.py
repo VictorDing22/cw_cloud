@@ -1,28 +1,43 @@
 """
-Edge Device Acoustic Emission Simulator
-Simulates multiple devices with 3 channels each, sending data to Kafka raw_topic.
+Edge Device Acoustic Emission Simulator — reads real TDMS files from floatdata/data.
 
-Message format per the technical spec:
-  deviceid:通道号:片段号:时间戳,v1,v2,v3,...
+Scans the data directory, groups files by device prefix (e.g. data-10-left-{1,2,3}),
+slices each channel's waveform into fixed-size fragments, and sends them to Kafka raw_topic
+in the protocol format:
 
-Partition routing: hash(deviceId) % num_partitions — same device always lands in the same partition.
+    deviceid:通道号:片段号:时间戳,v1,v2,v3,...
 
 Usage:
-  pip install kafka-python
-  python simulate_edge_device.py                           # default: 2 devices, 1000 Hz, continuous
-  python simulate_edge_device.py --devices 4 --rate 2000   # 4 devices, 2000 samples/fragment
-  python simulate_edge_device.py --burst 100               # send 100 fragments then stop
+    pip install kafka-python nptdms
+
+    # Send all TDMS files, 1000 samples per fragment
+    python simulate_edge_device.py
+
+    # Only a specific device group, 2000 samples per fragment
+    python simulate_edge_device.py --filter "data-10-left" --frag-size 2000
+
+    # Send 50 fragments then stop
+    python simulate_edge_device.py --burst 50
+
+    # List detected device groups without sending
+    python simulate_edge_device.py --list
 """
 
 import argparse
 import hashlib
-import json
-import math
-import random
+import os
+import re
 import signal
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
+
+try:
+    from nptdms import TdmsFile
+except ImportError:
+    print("ERROR: nptdms not installed. Run: pip install nptdms")
+    sys.exit(1)
 
 try:
     from kafka import KafkaProducer
@@ -32,6 +47,7 @@ except ImportError:
     sys.exit(1)
 
 TOPIC = "raw_topic"
+DEFAULT_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "floatdata", "data")
 running = True
 
 
@@ -45,36 +61,103 @@ signal.signal(signal.SIGTERM, sig_handler)
 
 
 def device_partitioner(key: bytes, all_partitions, available_partitions):
-    """Hash-based partitioner: same deviceId always goes to same partition."""
     h = int(hashlib.md5(key).hexdigest(), 16)
     parts = available_partitions if available_partitions else all_partitions
     return parts[h % len(parts)]
 
 
-def generate_ae_fragment(num_samples: int, inject_anomaly: bool = False):
+def discover_device_groups(data_dir: str):
     """
-    Generate a realistic acoustic emission voltage waveform fragment.
-    Normal background noise ~0.001V with occasional burst signals.
+    Group TDMS files into virtual devices by naming convention.
+
+    Pattern: data-{id}-{position}-{channel}.tdms  →  device = "data-{id}-{position}", ch = {channel}
+    Pattern: data{year}-{position}-{channel}.tdms  →  device = "data{year}-{position}", ch = {channel}
+    Fallback: standalone file  →  device = filename stem, ch = 1
     """
-    samples = []
-    base_noise = 0.002
-    for i in range(num_samples):
-        noise = random.gauss(0, base_noise)
-        if inject_anomaly and (num_samples * 0.4 < i < num_samples * 0.6):
-            burst_amplitude = random.uniform(0.05, 0.3)
-            freq = random.uniform(100_000, 500_000)
-            t = i / 2_000_000
-            noise += burst_amplitude * math.sin(2 * math.pi * freq * t) * math.exp(
-                -((i - num_samples * 0.5) ** 2) / (2 * (num_samples * 0.05) ** 2)
-            )
-        samples.append(round(noise, 6))
-    return samples
+    groups = defaultdict(dict)
+    pattern = re.compile(r"^(.+?)-(\d+)\.tdms$")
+
+    tdms_files = sorted(f for f in os.listdir(data_dir) if f.endswith(".tdms"))
+
+    for fname in tdms_files:
+        m = pattern.match(fname)
+        if m:
+            device_prefix = m.group(1)
+            channel_num = int(m.group(2))
+        else:
+            device_prefix = fname.replace(".tdms", "")
+            channel_num = 1
+
+        groups[device_prefix][channel_num] = os.path.join(data_dir, fname)
+
+    return dict(groups)
+
+
+def load_channel_data(filepath: str):
+    """Read a TDMS file and return (voltage_array, sampling_rate_hz, start_time_ms)."""
+    f = TdmsFile.read(filepath)
+    group = f.groups()[0]
+    ch = group.channels()[0]
+    data = ch.data
+    wf_inc = ch.properties.get("wf_increment", 5e-7)
+    sampling_rate = int(round(1.0 / wf_inc))
+    start_time = ch.properties.get("wf_start_time", None)
+    if start_time is not None:
+        import numpy as np
+        ts_ms = int((start_time - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(1, "ms"))
+    else:
+        ts_ms = int(time.time() * 1000)
+    return data, sampling_rate, ts_ms
 
 
 def run_simulator(args):
     global running
 
-    print(f"Connecting to Kafka at {args.broker}...")
+    data_dir = os.path.abspath(args.data_dir)
+    if not os.path.isdir(data_dir):
+        print(f"ERROR: data directory not found: {data_dir}")
+        sys.exit(1)
+
+    print(f"Scanning TDMS files in: {data_dir}")
+    device_groups = discover_device_groups(data_dir)
+
+    if not device_groups:
+        print("ERROR: no TDMS files found.")
+        sys.exit(1)
+
+    if args.filter:
+        device_groups = {k: v for k, v in device_groups.items() if args.filter in k}
+        if not device_groups:
+            print(f"ERROR: no device groups matching filter '{args.filter}'")
+            sys.exit(1)
+
+    print(f"\nDiscovered {len(device_groups)} device group(s):\n")
+    for dev, channels in sorted(device_groups.items()):
+        ch_list = ", ".join(f"ch{c}" for c in sorted(channels.keys()))
+        sizes = ", ".join(
+            f"{os.path.getsize(p)/1024/1024:.0f}MB" for _, p in sorted(channels.items())
+        )
+        print(f"  {dev:30s}  channels=[{ch_list}]  sizes=[{sizes}]")
+
+    if args.list:
+        return
+
+    # Load all channel data
+    print(f"\nLoading TDMS data into memory...")
+    device_data = {}
+    for dev, channels in sorted(device_groups.items()):
+        device_data[dev] = {}
+        for ch_num, fpath in sorted(channels.items()):
+            fname = os.path.basename(fpath)
+            data, sr, start_ts = load_channel_data(fpath)
+            device_data[dev][ch_num] = {
+                "data": data, "sampling_rate": sr,
+                "start_ts": start_ts, "filename": fname,
+            }
+            print(f"  Loaded {fname}: {len(data):,} samples @ {sr:,} Hz")
+
+    # Connect to Kafka
+    print(f"\nConnecting to Kafka at {args.broker}...")
     producer = KafkaProducer(
         bootstrap_servers=[args.broker],
         key_serializer=lambda k: k.encode("utf-8"),
@@ -86,18 +169,9 @@ def run_simulator(args):
         partitioner=device_partitioner,
     )
 
-    device_ids = [f"AE-DEVICE-{i+1:03d}" for i in range(args.devices)]
-    channels_per_device = 3
-    sampling_rate = 2_000_000
-
-    print(f"Simulator started:")
-    print(f"  Devices       : {device_ids}")
-    print(f"  Channels/dev  : {channels_per_device}")
-    print(f"  Samples/frag  : {args.rate}")
-    print(f"  Sampling rate : {sampling_rate} Hz")
-    print(f"  Anomaly prob  : {args.anomaly_pct}%")
-    print(f"  Target topic  : {TOPIC}")
-    print(f"  Burst count   : {'infinite' if args.burst == 0 else args.burst}")
+    frag_size = args.frag_size
+    print(f"\nStarting replay: frag_size={frag_size}, interval={args.interval}s, "
+          f"burst={'infinite' if args.burst == 0 else args.burst}")
     print()
 
     seq = 0
@@ -105,20 +179,33 @@ def run_simulator(args):
     total_bytes = 0
     start_time = time.time()
 
+    # Calculate max fragments across all channels
+    max_frags = 0
+    for dev, channels in device_data.items():
+        for ch_num, info in channels.items():
+            n = len(info["data"]) // frag_size
+            if n > max_frags:
+                max_frags = n
+
     try:
-        while running:
+        while running and (args.burst == 0 or seq < args.burst) and seq < max_frags:
             seq += 1
-            ts_ms = int(time.time() * 1000)
+            offset = (seq - 1) * frag_size
 
-            for device_id in device_ids:
-                inject = random.randint(1, 100) <= args.anomaly_pct
+            for dev, channels in sorted(device_data.items()):
+                device_id = dev.upper().replace(" ", "-")
 
-                for ch in range(1, channels_per_device + 1):
-                    samples = generate_ae_fragment(args.rate, inject_anomaly=inject)
-                    samples_str = ",".join(str(v) for v in samples)
+                for ch_num, info in sorted(channels.items()):
+                    data = info["data"]
+                    if offset + frag_size > len(data):
+                        continue
 
-                    # Format: deviceid:通道号:片段号:时间戳,v1,v2,v3,...
-                    message = f"{device_id}:{ch}:{seq}:{ts_ms},{samples_str}"
+                    fragment = data[offset : offset + frag_size]
+                    # Timestamp: start_ts + offset-based time increment
+                    ts_ms = info["start_ts"] + int(offset * 1000.0 / info["sampling_rate"])
+
+                    samples_str = ",".join(f"{v:.6f}" for v in fragment)
+                    message = f"{device_id}:{ch_num}:{seq}:{ts_ms},{samples_str}"
 
                     try:
                         producer.send(TOPIC, key=device_id, value=message)
@@ -127,22 +214,20 @@ def run_simulator(args):
                     except KafkaError as e:
                         print(f"  SEND ERROR: {e}")
 
-            if seq % 10 == 0:
+            if seq % 10 == 0 or seq == 1:
                 producer.flush()
                 elapsed = time.time() - start_time
-                rate_msg = total_sent / elapsed if elapsed > 0 else 0
                 rate_mb = (total_bytes / 1024 / 1024) / elapsed if elapsed > 0 else 0
+                rate_msg = total_sent / elapsed if elapsed > 0 else 0
+                pct = seq / max_frags * 100 if max_frags > 0 else 0
                 print(
-                    f"  [seq={seq:>6}] sent={total_sent:>8} msgs | "
+                    f"  [seq={seq:>6}/{max_frags}] sent={total_sent:>8} msgs | "
                     f"{rate_mb:.2f} MB/s | {rate_msg:.0f} msg/s | "
-                    f"ts={datetime.fromtimestamp(ts_ms/1000).strftime('%H:%M:%S')}"
+                    f"progress={pct:.1f}%"
                 )
 
-            if args.burst > 0 and seq >= args.burst:
-                print(f"\nBurst complete: {args.burst} fragments sent.")
-                break
-
-            time.sleep(args.interval)
+            if args.interval > 0:
+                time.sleep(args.interval)
 
     finally:
         producer.flush()
@@ -157,13 +242,23 @@ def run_simulator(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AE Edge Device Simulator → Kafka raw_topic")
-    parser.add_argument("--broker", default="localhost:9094", help="Kafka bootstrap server (default: localhost:9094)")
-    parser.add_argument("--devices", type=int, default=2, help="Number of simulated devices (default: 2)")
-    parser.add_argument("--rate", type=int, default=1000, help="Samples per fragment (default: 1000)")
-    parser.add_argument("--interval", type=float, default=0.1, help="Seconds between fragments (default: 0.1)")
-    parser.add_argument("--anomaly-pct", type=int, default=5, help="Anomaly injection probability %% (default: 5)")
-    parser.add_argument("--burst", type=int, default=0, help="Send N fragments then stop; 0=continuous (default: 0)")
+    parser = argparse.ArgumentParser(
+        description="AE Edge Device Simulator — replay real TDMS files → Kafka raw_topic"
+    )
+    parser.add_argument("--broker", default="localhost:9094",
+                        help="Kafka bootstrap server (default: localhost:9094)")
+    parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR,
+                        help="Directory containing .tdms files (default: floatdata/data)")
+    parser.add_argument("--frag-size", type=int, default=1000,
+                        help="Samples per fragment (default: 1000)")
+    parser.add_argument("--interval", type=float, default=0.05,
+                        help="Seconds between fragment batches (default: 0.05)")
+    parser.add_argument("--burst", type=int, default=0,
+                        help="Send N fragment batches then stop; 0=send all (default: 0)")
+    parser.add_argument("--filter", type=str, default=None,
+                        help="Only send device groups whose name contains this string")
+    parser.add_argument("--list", action="store_true",
+                        help="List discovered device groups and exit (no data sent)")
     args = parser.parse_args()
 
     run_simulator(args)

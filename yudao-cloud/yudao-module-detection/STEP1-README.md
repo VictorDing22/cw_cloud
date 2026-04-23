@@ -93,9 +93,15 @@ docker exec detection-tdengine taos -f /tmp/init.sql
 
 ---
 
-### 3. `scripts/simulate_edge_device.py` — 边端设备模拟器
+### 3. `scripts/simulate_edge_device.py` — 边端设备模拟器（真实 TDMS 回放）
 
-模拟多台声发射采集设备，每台 3 通道，按技术方案定义的报文格式发送数据到 Kafka。
+读取 `floatdata/data/` 目录下的真实 TDMS 采集文件，按文件命名规则自动分组为虚拟设备+通道，切片为固定大小的片段后发送到 Kafka。
+
+**数据来源：** `floatdata/data/*.tdms` — 真实声发射传感器采集的 2MHz 电压波形，每文件 1800 万~5000 万样本点。
+
+**设备分组规则：** 按文件名自动识别，例如：
+- `data-10-left-1.tdms`, `data-10-left-2.tdms`, `data-10-left-3.tdms` → 设备 `DATA-10-LEFT`，通道 1/2/3
+- 共自动发现 10 个设备组，其中 6 个完整 3 通道
 
 **报文格式（与技术方案一致）：**
 
@@ -103,40 +109,39 @@ docker exec detection-tdengine taos -f /tmp/init.sql
 deviceid:通道号:片段号:时间戳,v1,v2,v3,...
 ```
 
-示例：
+示例（真实数据）：
 
 ```
-AE-DEVICE-001:1:42:1713782400000,0.001574,0.002675,-0.000608,...
+DATA-10-LEFT:1:1:1681105991850,0.000810,0.000341,0.000497,-0.000284,...
 ```
-
-**波形生成逻辑：**
-- 正常模式：以 ~0.002V 标准差的高斯白噪声模拟背景信号
-- 异常注入：在片段中段叠加一个高斯包络的高频正弦突发信号（100~500kHz，峰值 0.05~0.3V），模拟真实声发射事件
 
 **分区路由：** 以 `deviceId` 为 key，MD5 哈希后取模，同一设备的全部通道消息落入同一 Kafka 分区。
 
 **使用方法：**
 
 ```bash
-pip install kafka-python
+pip install kafka-python nptdms
 
-# 连续发送（2 设备，每片段 1000 样本点，间隔 100ms）
+# 查看自动发现的设备分组（不发送数据）
+python3 scripts/simulate_edge_device.py --list
+
+# 发送所有设备的全部数据（每片段 1000 样本点）
 python3 scripts/simulate_edge_device.py
 
-# 发 10 个片段后停止
-python3 scripts/simulate_edge_device.py --burst 10
+# 只发 data-10-left 设备组，每片段 2000 样本
+python3 scripts/simulate_edge_device.py --filter "data-10-left" --frag-size 2000
 
-# 4 台设备，每片段 2000 采样点
-python3 scripts/simulate_edge_device.py --devices 4 --rate 2000
+# 发 50 个片段批次后停止
+python3 scripts/simulate_edge_device.py --burst 50
 
 # 全部参数
 python3 scripts/simulate_edge_device.py \
   --broker localhost:9094 \
-  --devices 2 \
-  --rate 1000 \
-  --interval 0.1 \
-  --anomaly-pct 5 \
-  --burst 0
+  --data-dir ../../floatdata/data \
+  --frag-size 1000 \
+  --interval 0.05 \
+  --burst 0 \
+  --filter "data-10"
 ```
 
 ---
