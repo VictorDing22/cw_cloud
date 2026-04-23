@@ -94,7 +94,7 @@ def discover_device_groups(data_dir: str):
 
 
 def load_channel_data(filepath: str):
-    """Read a TDMS file and return (voltage_array, sampling_rate_hz, start_time_ms)."""
+    """Read a TDMS file and return (voltage_array, sampling_rate_hz, start_time_ns)."""
     f = TdmsFile.read(filepath)
     group = f.groups()[0]
     ch = group.channels()[0]
@@ -104,10 +104,10 @@ def load_channel_data(filepath: str):
     start_time = ch.properties.get("wf_start_time", None)
     if start_time is not None:
         import numpy as np
-        ts_ms = int((start_time - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(1, "ms"))
+        ts_ns = int((start_time - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(1, "ns"))
     else:
-        ts_ms = int(time.time() * 1000)
-    return data, sampling_rate, ts_ms
+        ts_ns = int(time.time() * 1e9)
+    return data, sampling_rate, ts_ns
 
 
 def run_simulator(args):
@@ -201,11 +201,12 @@ def run_simulator(args):
                         continue
 
                     fragment = data[offset : offset + frag_size]
-                    # Timestamp: start_ts + offset-based time increment
-                    ts_ms = info["start_ts"] + int(offset * 1000.0 / info["sampling_rate"])
+                    # Nanosecond timestamp: start_ts_ns + offset * (1e9 / sampling_rate)
+                    sample_interval_ns = 1_000_000_000 // info["sampling_rate"]
+                    ts_ns = info["start_ts"] + offset * sample_interval_ns
 
                     samples_str = ",".join(f"{v:.6f}" for v in fragment)
-                    message = f"{device_id}:{ch_num}:{seq}:{ts_ms},{samples_str}"
+                    message = f"{device_id}:{ch_num}:{seq}:{ts_ns},{samples_str}"
 
                     try:
                         producer.send(TOPIC, key=device_id, value=message)

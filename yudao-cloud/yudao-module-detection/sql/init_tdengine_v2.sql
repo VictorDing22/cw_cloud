@@ -1,5 +1,5 @@
 -- Detection Platform TDengine Schema (based on technical spec)
-CREATE DATABASE IF NOT EXISTS yudao_detection KEEP 365 DURATION 10 BUFFER 256 WAL_LEVEL 1;
+CREATE DATABASE IF NOT EXISTS yudao_detection KEEP 3650 DURATION 30 BUFFER 256 WAL_LEVEL 1 PRECISION 'ns';
 
 USE yudao_detection;
 
