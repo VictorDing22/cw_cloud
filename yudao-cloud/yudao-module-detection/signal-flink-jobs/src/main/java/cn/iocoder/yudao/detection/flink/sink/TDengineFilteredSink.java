@@ -1,8 +1,13 @@
 package cn.iocoder.yudao.detection.flink.sink;
 
 import cn.iocoder.yudao.detection.flink.schema.RawSignalRecord;
+import cn.iocoder.yudao.detection.flink.util.ExceptionMessages;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,28 +18,34 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * Batch sink for TDengine filtered_data table.
- * Same batching strategy as TDengineRawSink, but targets the filtered_data stable
- * which has columns: ts TIMESTAMP, voltage FLOAT, seq INT
- * and tags: device_id NCHAR(32), channel_id TINYINT.
+ * Write failures are sent to exception_topic (dead-letter queue) instead of crashing.
  */
 public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
     private static final Logger LOG = LoggerFactory.getLogger(TDengineFilteredSink.class);
+    private static final String JOB_NAME = "signal-save-filtered-flink-job";
 
     private final String jdbcUrl;
     private final int batchSize;
     private final long flushIntervalMs;
+    private final String kafkaBroker;
+    private final String exceptionTopic;
 
     private transient Connection connection;
     private transient List<RawSignalRecord> buffer;
     private transient long lastFlushTime;
+    private transient KafkaProducer<String, String> exceptionProducer;
 
-    public TDengineFilteredSink(String jdbcUrl, int batchSize, long flushIntervalMs) {
+    public TDengineFilteredSink(String jdbcUrl, int batchSize, long flushIntervalMs,
+                                String kafkaBroker, String exceptionTopic) {
         this.jdbcUrl = jdbcUrl;
         this.batchSize = batchSize;
         this.flushIntervalMs = flushIntervalMs;
+        this.kafkaBroker = kafkaBroker;
+        this.exceptionTopic = exceptionTopic;
     }
 
     @Override
@@ -43,7 +54,16 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
         connection = DriverManager.getConnection(jdbcUrl, "root", "taosdata");
         buffer = new ArrayList<>(batchSize);
         lastFlushTime = System.currentTimeMillis();
-        LOG.info("TDengineFilteredSink opened, url={}, batchSize={}", jdbcUrl, batchSize);
+
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBroker);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.put(ProducerConfig.ACKS_CONFIG, "1");
+        exceptionProducer = new KafkaProducer<>(props);
+
+        LOG.info("TDengineFilteredSink opened, url={}, batchSize={}, exceptionTopic={}",
+                 jdbcUrl, batchSize, exceptionTopic);
     }
 
     @Override
@@ -55,7 +75,7 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
         }
     }
 
-    private void flush() throws Exception {
+    private void flush() {
         if (buffer.isEmpty()) return;
 
         Map<String, List<RawSignalRecord>> grouped = new HashMap<>();
@@ -64,8 +84,8 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
         }
 
-        // filtered_data columns: ts, voltage, seq (no 'sampling' column)
         StringBuilder sql = new StringBuilder("INSERT INTO ");
+        String firstDeviceId = buffer.get(0).getDeviceId();
         for (Map.Entry<String, List<RawSignalRecord>> entry : grouped.entrySet()) {
             List<RawSignalRecord> records = entry.getValue();
             RawSignalRecord first = records.get(0);
@@ -84,24 +104,38 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
 
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(sql.toString());
+            LOG.info("Flushed {} filtered records to TDengine", buffer.size());
         } catch (Exception e) {
-            LOG.error("TDengine filtered batch insert failed ({} records): {}", buffer.size(), e.getMessage());
-            throw e;
+            LOG.error("TDengine filtered_data write failed ({} records), sending to exception_topic: {}",
+                      buffer.size(), e.getMessage());
+            sendToExceptionTopic(firstDeviceId, buffer.size(), e.getMessage());
         }
 
-        int count = buffer.size();
         buffer.clear();
         lastFlushTime = System.currentTimeMillis();
-        LOG.info("Flushed {} filtered records to TDengine", count);
+    }
+
+    private void sendToExceptionTopic(String deviceId, int recordCount, String errorMsg) {
+        try {
+            String json = ExceptionMessages.buildWriteErrorJson(
+                    JOB_NAME, recordCount, deviceId, errorMsg);
+            exceptionProducer.send(new ProducerRecord<>(exceptionTopic, deviceId, json));
+            exceptionProducer.flush();
+        } catch (Exception ex) {
+            LOG.error("Failed to send to exception_topic: {}", ex.getMessage());
+        }
     }
 
     @Override
     public void close() throws Exception {
         if (buffer != null && !buffer.isEmpty()) {
-            try { flush(); } catch (Exception e) { LOG.error("Final flush failed", e); }
+            flush();
         }
         if (connection != null && !connection.isClosed()) {
             connection.close();
+        }
+        if (exceptionProducer != null) {
+            exceptionProducer.close();
         }
         LOG.info("TDengineFilteredSink closed");
     }
