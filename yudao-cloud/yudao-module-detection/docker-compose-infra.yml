@@ -104,6 +104,7 @@ services:
     volumes:
       - tdengine_data:/var/lib/taos
       - tdengine_log:/var/log/taos
+      - ./config/explorer.toml:/etc/taos/explorer.toml:ro
     networks:
       - detection-network
     healthcheck:
