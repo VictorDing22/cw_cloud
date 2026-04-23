@@ -1,0 +1,172 @@
+services:
+  # ============================================================
+  #  Kafka (KRaft mode, single node) — official Apache image
+  # ============================================================
+  kafka:
+    image: apache/kafka:3.9.2
+    container_name: detection-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_NUM_PARTITIONS: 8
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      CLUSTER_ID: "detection-cluster-00001"
+    networks:
+      - detection-network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  # Kafka topic initialization (runs once then exits)
+  kafka-init:
+    image: apache/kafka:3.9.2
+    container_name: detection-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo '>>> Creating detection Kafka topics...'
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic raw_topic --partitions 8 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered_topic --partitions 8 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic anomaly_topic --partitions 8 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic exception_topic --partitions 4 --replication-factor 1
+        echo '>>> All topics:'
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+        echo '>>> Done.'
+    networks:
+      - detection-network
+
+  # Kafka UI — web dashboard at http://localhost:8089
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: detection-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: detection-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - detection-network
+
+  # ============================================================
+  #  TDengine — time-series DB
+  #  REST API: http://localhost:6041
+  # ============================================================
+  tdengine:
+    image: tdengine/tdengine:3.3.2.0
+    container_name: detection-tdengine
+    restart: unless-stopped
+    ports:
+      - "6030:6030"
+      - "6041:6041"
+      - "6043:6043"
+      - "6044:6044"
+      - "6044:6044/udp"
+      - "6045:6045"
+      - "6045:6045/udp"
+      - "6046:6046"
+      - "6046:6046/udp"
+      - "6047:6047"
+      - "6047:6047/udp"
+      - "6048:6048"
+      - "6048:6048/udp"
+      - "6049:6049"
+      - "6049:6049/udp"
+      - "6060:6060"
+    environment:
+      TAOS_FIRST_EP: tdengine:6030
+      TAOS_FQDN: tdengine
+    volumes:
+      - tdengine_data:/var/lib/taos
+      - tdengine_log:/var/log/taos
+    networks:
+      - detection-network
+    healthcheck:
+      test: ["CMD", "taos", "-s", "select server_version()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # TDengine schema init — run manually after first start:
+  #   docker cp sql/init_tdengine_v2.sql detection-tdengine:/tmp/init.sql
+  #   docker exec detection-tdengine taos -f /tmp/init.sql
+
+  # ============================================================
+  #  Flink — stream processing engine
+  #  Dashboard: http://localhost:8081
+  # ============================================================
+  flink-jobmanager:
+    image: flink:1.18.1
+    container_name: detection-flink-jobmanager
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: 1024m
+        state.backend: hashmap
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        execution.checkpointing.interval: 60000
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - detection-network
+
+  flink-taskmanager:
+    image: flink:1.18.1
+    container_name: detection-flink-taskmanager
+    restart: unless-stopped
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 8
+        taskmanager.memory.process.size: 2048m
+        state.backend: hashmap
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - detection-network
+
+volumes:
+  tdengine_data:
+    driver: local
+  tdengine_log:
+    driver: local
+  flink_checkpoints:
+    driver: local
+
+networks:
+  detection-network:
+    driver: bridge
