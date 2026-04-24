@@ -11,7 +11,7 @@
 | kafka-python | — | `pip3 install kafka-python` |
 | nptdms | — | `pip3 install nptdms` |
 
-TDMS 数据文件应存放于 `floatdata/data/`（相对于仓库根目录），模拟器脚本会自动读取。
+TDMS 数据文件应存放于 `floatdata/data/`（相对于仓库根目录），模拟器脚本会自动读取。当前保留 5 个设备的数据文件（data-10-left、data-10-right、data-15-right、data-20-right、data2023-left），其余已备份至 `floatdata/data_backup/`。
 
 文件结构依赖：
 
@@ -39,7 +39,7 @@ cd /Users/dingsaier/Desktop/cw_cloud/yudao-cloud/yudao-module-detection
 docker compose -f docker-compose-infra.yml up -d
 ```
 
-等待约 60 秒，Kafka 健康检查通过后 `kafka-init` 会自动创建 4 个 topic。
+等待约 60 秒，Kafka 健康检查通过后 `kafka-init` 会自动创建 4 个 topic（其中 `raw_topic` 为 **5 partitions**，其余 8 partitions）。
 
 ### 2. 确认容器状态
 
@@ -97,6 +97,15 @@ docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server lo
 
 应看到：`anomaly_topic`、`exception_topic`、`filtered_topic`、`raw_topic`。
 
+验证 `raw_topic` 分区数：
+
+```bash
+docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic raw_topic | head -1
+```
+
+应显示 `PartitionCount: 5`。
+
 ### 6. 验证 Web 界面
 
 | 服务 | 地址 | 账号 |
@@ -112,7 +121,7 @@ docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server lo
 | 检查项 | 验证命令 | 期望结果 |
 |--------|---------|---------|
 | 容器全部运行 | `docker compose -f docker-compose-infra.yml ps` | 5 个容器 Up |
-| Kafka 4 个 topic | `docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list` | 4 个 topic |
+| Kafka 4 个 topic | `docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list` | 4 个 topic，raw_topic 为 5 partitions |
 | TDengine 4 张超级表 | `docker exec detection-tdengine taos -s "USE yudao_detection; SHOW STABLES;"` | 4 row(s) |
 | Kafka UI 可访问 | 浏览器打开 http://localhost:8089 | 页面正常 |
 | Flink Dashboard 可访问 | 浏览器打开 http://localhost:8081 | 页面正常 |
