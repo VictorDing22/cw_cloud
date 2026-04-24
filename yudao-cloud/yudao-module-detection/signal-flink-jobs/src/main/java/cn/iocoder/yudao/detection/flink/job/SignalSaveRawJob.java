@@ -39,6 +39,7 @@ public class SignalSaveRawJob {
                  JOB_NAME, kafkaBroker, tdengineUrl, batchSize, topic, exceptionTopic);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.enableCheckpointing(30_000);   // checkpoint every 30s → commits Kafka offsets
 
         KafkaSource<String> kafkaSource = KafkaSource.<String>builder()
                 .setBootstrapServers(kafkaBroker)

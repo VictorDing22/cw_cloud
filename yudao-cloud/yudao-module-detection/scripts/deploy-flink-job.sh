@@ -3,8 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 JOB_CLASS="${1:-cn.iocoder.yudao.detection.flink.job.SignalSaveRawJob}"
-BATCH_SIZE="${2:-2000}"
+BATCH_SIZE="${2:-16000}"
 TOPIC="${3:-raw_topic}"
+PARALLELISM="${4:-5}"
 JAR_NAME="signal-flink-jobs-1.0.0.jar"
 JAR_PATH="signal-flink-jobs/target/$JAR_NAME"
 REMOTE_JAR="/opt/flink/usrlib/$JAR_NAME"
@@ -20,8 +21,9 @@ for c in detection-flink-jobmanager detection-flink-taskmanager; do
   docker cp "$JAR_PATH" "$c:$REMOTE_JAR"
 done
 
-echo "=== [3/4] 提交 Flink Job ==="
+echo "=== [3/4] 提交 Flink Job（并行度: ${PARALLELISM}）==="
 docker exec detection-flink-jobmanager /opt/flink/bin/flink run -d \
+  -p "${PARALLELISM}" \
   -c "$JOB_CLASS" \
   "$REMOTE_JAR" \
   kafka:9092 \
