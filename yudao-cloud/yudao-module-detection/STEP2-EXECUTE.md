@@ -14,7 +14,7 @@ cd /Users/dingsaier/Desktop/cw_cloud/yudao-cloud/yudao-module-detection
 |---|---|---|
 | `raw_topic` partitions | **5** | 与 5 个保留设备一一对应，MD5 哈希零碰撞 |
 | Flink 并行度 | **5** | 与 partition 数对齐，每个 subtask 处理一个分区 |
-| TDengine batchSize | **16000** | 减少 REST 请求频次，提升写入吞吐 |
+| TDengine batchSize | **16** (Kafka 消息数) | 每 16 条消息（≈16K 样本）flush 一次 |
 | Checkpoint 间隔 | **30s** | 保障 Kafka offset 正常提交，支持断点续跑 |
 
 保留的 5 个测试设备及其分区映射：

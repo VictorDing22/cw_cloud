@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 JOB_CLASS="${1:-cn.iocoder.yudao.detection.flink.job.SignalSaveRawJob}"
-BATCH_SIZE="${2:-16000}"
+BATCH_SIZE="${2:-16}"
 TOPIC="${3:-raw_topic}"
 PARALLELISM="${4:-5}"
 JAR_NAME="signal-flink-jobs-1.0.0.jar"
