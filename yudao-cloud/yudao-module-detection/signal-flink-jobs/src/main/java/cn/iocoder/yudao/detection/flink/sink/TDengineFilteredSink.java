@@ -1,6 +1,5 @@
 package cn.iocoder.yudao.detection.flink.sink;
 
-import cn.iocoder.yudao.detection.flink.schema.RawSignalRecord;
 import cn.iocoder.yudao.detection.flink.util.ExceptionMessages;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
@@ -16,17 +15,33 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.regex.Pattern;
 
 /**
- * Batch sink for TDengine filtered_data table.
- * Write failures are sent to exception_topic (dead-letter queue) instead of crashing.
+ * High-throughput batch sink for TDengine filtered_data table.
+ *
+ * Aligned with TDengineRawSink optimizations:
+ *   - Receives raw Kafka message Strings (not pre-expanded RawSignalRecord)
+ *   - Parses voltage values during flush() with zero-copy string append
+ *   - Pre-compiled regex, sanitize cache, pre-sized StringBuilder
+ *   - batchSize counts Kafka messages, not individual samples
+ *   - Write failures → exception_topic (dead-letter queue)
+ *
+ * Differences from TDengineRawSink:
+ *   - Target super table: filtered_data (not raw_data)
+ *   - Sub-table prefix: f_ (not t_)
+ *   - Columns: ts, voltage, seq (no sampling column)
  */
-public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
+public class TDengineFilteredSink extends RichSinkFunction<String> {
     private static final Logger LOG = LoggerFactory.getLogger(TDengineFilteredSink.class);
     private static final String JOB_NAME = "signal-save-filtered-flink-job";
+    private static final int SAMPLING_RATE = 2_000_000;
+    private static final long SAMPLE_INTERVAL_NS = 1_000_000_000L / SAMPLING_RATE;
+    private static final Pattern SANITIZE_PATTERN = Pattern.compile("[^a-z0-9]");
 
     private final String jdbcUrl;
     private final int batchSize;
@@ -35,9 +50,11 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
     private final String exceptionTopic;
 
     private transient Connection connection;
-    private transient List<RawSignalRecord> buffer;
+    private transient List<String> buffer;
     private transient long lastFlushTime;
+    private transient long flushCount;
     private transient KafkaProducer<String, String> exceptionProducer;
+    private transient Map<String, String> sanitizeCache;
 
     public TDengineFilteredSink(String jdbcUrl, int batchSize, long flushIntervalMs,
                                 String kafkaBroker, String exceptionTopic) {
@@ -54,6 +71,8 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
         connection = DriverManager.getConnection(jdbcUrl, "root", "taosdata");
         buffer = new ArrayList<>(batchSize);
         lastFlushTime = System.currentTimeMillis();
+        flushCount = 0;
+        sanitizeCache = new HashMap<>();
 
         Properties props = new Properties();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBroker);
@@ -62,13 +81,13 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
         props.put(ProducerConfig.ACKS_CONFIG, "1");
         exceptionProducer = new KafkaProducer<>(props);
 
-        LOG.info("TDengineFilteredSink opened, url={}, batchSize={}, exceptionTopic={}",
-                 jdbcUrl, batchSize, exceptionTopic);
+        LOG.info("TDengineFilteredSink opened: url={}, batchMessages={}, flushMs={}, exceptionTopic={}",
+                 jdbcUrl, batchSize, flushIntervalMs, exceptionTopic);
     }
 
     @Override
-    public void invoke(RawSignalRecord record, Context context) throws Exception {
-        buffer.add(record);
+    public void invoke(String message, Context context) throws Exception {
+        buffer.add(message);
         long now = System.currentTimeMillis();
         if (buffer.size() >= batchSize || (now - lastFlushTime) >= flushIntervalMs) {
             flush();
@@ -78,37 +97,93 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
     private void flush() {
         if (buffer.isEmpty()) return;
 
-        Map<String, List<RawSignalRecord>> grouped = new HashMap<>();
-        for (RawSignalRecord r : buffer) {
-            String key = sanitize(r.getDeviceId()) + "_" + r.getChannelId();
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
+        Map<String, StringBuilder> tableValues = new LinkedHashMap<>();
+        Map<String, String[]> tableTags = new HashMap<>();
+        String firstDeviceId = null;
+        int totalRecords = 0;
+
+        for (String message : buffer) {
+            try {
+                int firstComma = message.indexOf(',');
+                if (firstComma < 0) continue;
+
+                int c1 = message.indexOf(':');
+                int c2 = message.indexOf(':', c1 + 1);
+                int c3 = message.indexOf(':', c2 + 1);
+
+                String deviceId = message.substring(0, c1);
+                String channelStr = message.substring(c1 + 1, c2);
+                int seq = Integer.parseInt(message.substring(c2 + 1, c3));
+                long baseTs = Long.parseLong(message.substring(c3 + 1, firstComma));
+
+                if (firstDeviceId == null) firstDeviceId = deviceId;
+
+                String sanitizedDevice = sanitizeCache.computeIfAbsent(deviceId,
+                        k -> SANITIZE_PATTERN.matcher(k.toLowerCase()).replaceAll("_"));
+                String subtableKey = sanitizedDevice + "_" + channelStr;
+                tableTags.putIfAbsent(subtableKey, new String[]{deviceId, channelStr});
+
+                StringBuilder values = tableValues.computeIfAbsent(subtableKey,
+                        k -> new StringBuilder(64 * 1024));
+
+                int sampleIdx = 0;
+                int pos = firstComma + 1;
+                int msgLen = message.length();
+
+                while (pos < msgLen) {
+                    int nextComma = message.indexOf(',', pos);
+                    if (nextComma < 0) nextComma = msgLen;
+
+                    long tsNs = baseTs + (long) sampleIdx * SAMPLE_INTERVAL_NS;
+
+                    // filtered_data columns: ts, voltage, seq (no sampling column)
+                    values.append('(')
+                          .append(tsNs).append(',')
+                          .append((CharSequence) message, pos, nextComma).append(',')
+                          .append(seq)
+                          .append(')');
+
+                    totalRecords++;
+                    sampleIdx++;
+                    pos = nextComma + 1;
+                }
+            } catch (Exception e) {
+                if (firstDeviceId == null) firstDeviceId = "unknown";
+                sendToExceptionTopic(firstDeviceId, 0,
+                        "flush parse error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
         }
 
-        StringBuilder sql = new StringBuilder("INSERT INTO ");
-        String firstDeviceId = buffer.get(0).getDeviceId();
-        for (Map.Entry<String, List<RawSignalRecord>> entry : grouped.entrySet()) {
-            List<RawSignalRecord> records = entry.getValue();
-            RawSignalRecord first = records.get(0);
+        if (totalRecords == 0) {
+            buffer.clear();
+            lastFlushTime = System.currentTimeMillis();
+            return;
+        }
+
+        StringBuilder sql = new StringBuilder(totalRecords * 40 + 512);
+        sql.append("INSERT INTO ");
+        for (Map.Entry<String, StringBuilder> entry : tableValues.entrySet()) {
+            String[] tags = tableTags.get(entry.getKey());
             sql.append("f_").append(entry.getKey())
                .append(" USING filtered_data TAGS ('")
-               .append(first.getDeviceId()).append("', ")
-               .append(first.getChannelId()).append(") VALUES ");
-            for (RawSignalRecord r : records) {
-                sql.append('(')
-                   .append(r.getTimestampNs()).append(", ")
-                   .append(String.format("%.8f", r.getVoltage())).append(", ")
-                   .append(r.getSeq())
-                   .append(") ");
-            }
+               .append(tags[0]).append("', ")
+               .append(tags[1]).append(") VALUES ")
+               .append(entry.getValue())
+               .append(' ');
         }
 
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(sql.toString());
-            LOG.info("Flushed {} filtered records to TDengine", buffer.size());
+            flushCount++;
+            if (flushCount <= 5 || flushCount % 200 == 0) {
+                LOG.info("Flushed {} msgs ({} records) to TDengine filtered_data [flush #{}]",
+                         buffer.size(), totalRecords, flushCount);
+            }
         } catch (Exception e) {
-            LOG.error("TDengine filtered_data write failed ({} records), sending to exception_topic: {}",
-                      buffer.size(), e.getMessage());
-            sendToExceptionTopic(firstDeviceId, buffer.size(), e.getMessage());
+            LOG.error("TDengine filtered_data write failed ({} records): {}",
+                      totalRecords, e.getMessage());
+            sendToExceptionTopic(firstDeviceId != null ? firstDeviceId : "unknown",
+                                 totalRecords, e.getMessage());
         }
 
         buffer.clear();
@@ -137,10 +212,6 @@ public class TDengineFilteredSink extends RichSinkFunction<RawSignalRecord> {
         if (exceptionProducer != null) {
             exceptionProducer.close();
         }
-        LOG.info("TDengineFilteredSink closed");
-    }
-
-    private static String sanitize(String input) {
-        return input.toLowerCase().replaceAll("[^a-z0-9]", "_");
+        LOG.info("TDengineFilteredSink closed after {} flushes", flushCount);
     }
 }

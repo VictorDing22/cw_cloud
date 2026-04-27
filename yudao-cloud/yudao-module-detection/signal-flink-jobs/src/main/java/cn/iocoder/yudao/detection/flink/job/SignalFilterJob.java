@@ -1,51 +1,67 @@
 package cn.iocoder.yudao.detection.flink.job;
 
-import cn.iocoder.yudao.detection.flink.filter.ButterworthBandpass;
 import cn.iocoder.yudao.detection.flink.util.ExceptionMessages;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.api.common.state.ValueState;
-import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.streaming.api.datastream.AsyncDataStream;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
+import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.util.Collector;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
- * signal-filter-flink-job
+ * signal-filter-flink-job (方案 B — 微服务滤波)
  *
- * Consumes raw_topic, applies a 4th-order Butterworth bandpass filter to each voltage
- * fragment (per device+channel), and publishes filtered data to filtered_topic.
- * Parse / filter errors are routed to exception_topic via side output.
+ * 消费 raw_topic，通过异步 HTTP 调用 filter-gateway 微服务（盛老师 Kalman/RLS/LS API），
+ * 将滤波后的干净波形写入 filtered_topic。
+ * 滤波失败 / 超时的消息路由到 exception_topic。
  */
 public class SignalFilterJob {
     private static final Logger LOG = LoggerFactory.getLogger(SignalFilterJob.class);
     private static final String JOB_NAME = "signal-filter-flink-job";
+    static final String ERROR_PREFIX = "__FILTER_ERR__:";
 
     public static void main(String[] args) throws Exception {
-        String kafkaBroker   = args.length > 0 ? args[0] : "kafka:9092";
-        String inputTopic    = args.length > 1 ? args[1] : "raw_topic";
-        String outputTopic   = args.length > 2 ? args[2] : "filtered_topic";
-        double lowCutoff     = args.length > 3 ? Double.parseDouble(args[3]) : 100_000.0;
-        double highCutoff    = args.length > 4 ? Double.parseDouble(args[4]) : 900_000.0;
-        double samplingRate  = args.length > 5 ? Double.parseDouble(args[5]) : 2_000_000.0;
-        String exceptionTopic = args.length > 6 ? args[6] : ExceptionMessages.DEFAULT_EXCEPTION_TOPIC;
+        String kafkaBroker      = args.length > 0 ? args[0] : "kafka:9092";
+        String inputTopic       = args.length > 1 ? args[1] : "raw_topic";
+        String outputTopic      = args.length > 2 ? args[2] : "filtered_topic";
+        String filterGatewayUrl = args.length > 3 ? args[3] : "http://filter-gateway:8010";
+        String filterType       = args.length > 4 ? args[4] : "kalman";
+        String exceptionTopic   = args.length > 5 ? args[5] : ExceptionMessages.DEFAULT_EXCEPTION_TOPIC;
 
-        LOG.info("{} starting: kafka={}, in={}, out={}, bandpass={}-{}Hz, fs={}Hz, exceptionTopic={}",
+        LOG.info("{} starting: kafka={}, in={}, out={}, gateway={}, filterType={}, exceptionTopic={}",
                  JOB_NAME, kafkaBroker, inputTopic, outputTopic,
-                 lowCutoff, highCutoff, samplingRate, exceptionTopic);
+                 filterGatewayUrl, filterType, exceptionTopic);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.enableCheckpointing(30_000);
 
         KafkaSource<String> kafkaSource = KafkaSource.<String>builder()
                 .setBootstrapServers(kafkaBroker)
@@ -55,116 +71,182 @@ public class SignalFilterJob {
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 
-        // Bandpass filter with error side output
-        SingleOutputStreamOperator<String> filteredStream = env
-                .fromSource(kafkaSource, WatermarkStrategy.noWatermarks(), "KafkaRawSource")
-                .keyBy(msg -> {
-                    int firstComma = msg.indexOf(',');
-                    if (firstComma < 0) return "unknown";
-                    String header = msg.substring(0, firstComma);
-                    String[] parts = header.split(":");
-                    return parts.length >= 2 ? parts[0] + ":" + parts[1] : "unknown";
-                })
-                .process(new BandpassFilterFunction(samplingRate, lowCutoff, highCutoff))
-                .name("ButterworthBandpass");
+        DataStream<String> inputStream = env
+                .fromSource(kafkaSource, WatermarkStrategy.noWatermarks(), "KafkaRawSource");
 
-        // Main path → Kafka filtered_topic
+        // Async HTTP → filter-gateway，最大 100 并发请求，30s 超时
+        DataStream<String> asyncResult = AsyncDataStream.unorderedWait(
+                inputStream,
+                new AsyncFilterFunction(filterGatewayUrl, filterType),
+                30_000,
+                TimeUnit.MILLISECONDS,
+                100);
+
+        // 拆分正常 / 异常流
+        SingleOutputStreamOperator<String> filtered = asyncResult
+                .process(new ErrorSplitter())
+                .name("SplitFilterErrors");
+
+        // 正常流 → filtered_topic
         KafkaSink<String> kafkaSink = KafkaSink.<String>builder()
                 .setBootstrapServers(kafkaBroker)
                 .setRecordSerializer(new FilteredMessageSerializer(outputTopic))
                 .build();
-        filteredStream.sinkTo(kafkaSink).name("KafkaFilteredSink");
+        filtered.sinkTo(kafkaSink).name("KafkaFilteredSink");
 
-        // Exception path → Kafka exception_topic
-        ExceptionMessages.wireExceptionSink(filteredStream, kafkaBroker, exceptionTopic, "ExceptionSink");
+        // 异常流 → exception_topic
+        ExceptionMessages.wireExceptionSink(filtered, kafkaBroker, exceptionTopic, "FilterExceptionSink");
 
         env.execute(JOB_NAME);
     }
 
-    /**
-     * Stateful bandpass filter with error handling.
-     * Parse/filter errors go to EXCEPTION_TAG side output.
-     */
-    public static class BandpassFilterFunction
-            extends KeyedProcessFunction<String, String, String> {
+    // =========================================================================
+    //  AsyncFilterFunction — 异步 HTTP 调用 filter-gateway
+    // =========================================================================
+    public static class AsyncFilterFunction extends RichAsyncFunction<String, String> {
         private static final long serialVersionUID = 1L;
 
-        private final double samplingRate;
-        private final double lowCutoff;
-        private final double highCutoff;
+        private final String filterGatewayUrl;
+        private final String filterType;
 
-        private transient ValueState<double[]> filterStateHandle;
+        private transient HttpClient httpClient;
+        private transient ObjectMapper objectMapper;
+        private transient ExecutorService executor;
+        private transient long requestCount;
 
-        public BandpassFilterFunction(double samplingRate, double lowCutoff, double highCutoff) {
-            this.samplingRate = samplingRate;
-            this.lowCutoff = lowCutoff;
-            this.highCutoff = highCutoff;
+        public AsyncFilterFunction(String filterGatewayUrl, String filterType) {
+            this.filterGatewayUrl = filterGatewayUrl;
+            this.filterType = filterType;
         }
 
         @Override
         public void open(Configuration parameters) {
-            filterStateHandle = getRuntimeContext().getState(
-                    new ValueStateDescriptor<>("bpFilterState", double[].class));
+            httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+            objectMapper = new ObjectMapper();
+            executor = Executors.newFixedThreadPool(
+                    Math.max(8, Runtime.getRuntime().availableProcessors() * 2));
+            requestCount = 0;
         }
 
         @Override
-        public void processElement(String message, Context ctx, Collector<String> out)
-                throws Exception {
-            String deviceId = "";
-            String channelStr = "";
-            String seqStr = "";
-            try {
-                int firstComma = message.indexOf(',');
-                if (firstComma < 0) {
-                    ctx.output(ExceptionMessages.EXCEPTION_TAG,
-                            ExceptionMessages.buildErrorJson(JOB_NAME, "parse_error",
-                                    "No comma found in message", message));
-                    return;
+        public void close() {
+            if (executor != null) {
+                executor.shutdown();
+                try { executor.awaitTermination(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+            }
+        }
+
+        @Override
+        public void asyncInvoke(String message, ResultFuture<String> resultFuture) {
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return processMessage(message);
+                } catch (Exception e) {
+                    return ERROR_PREFIX + ExceptionMessages.buildErrorJson(
+                            JOB_NAME, "filter_error",
+                            e.getClass().getSimpleName() + ": " + e.getMessage(),
+                            message);
                 }
+            }, executor).thenAccept(result ->
+                    resultFuture.complete(Collections.singleton(result))
+            );
+        }
 
-                String header = message.substring(0, firstComma);
-                String[] headerParts = header.split(":");
-                if (headerParts.length >= 1) deviceId = headerParts[0];
-                if (headerParts.length >= 2) channelStr = headerParts[1];
-                if (headerParts.length >= 3) seqStr = headerParts[2];
+        private String processMessage(String message) throws Exception {
+            int firstComma = message.indexOf(',');
+            if (firstComma < 0) {
+                throw new IllegalArgumentException("No comma in message (invalid format)");
+            }
 
-                String voltagesCsv = message.substring(firstComma + 1);
-                String[] values = voltagesCsv.split(",");
+            String header = message.substring(0, firstComma);
+            String[] headerParts = header.split(":");
+            if (headerParts.length < 4) {
+                throw new IllegalArgumentException("Header requires 4 colon-separated fields, got " + headerParts.length);
+            }
 
-                if (values.length == 0) {
-                    ctx.output(ExceptionMessages.EXCEPTION_TAG,
-                            ExceptionMessages.buildErrorJson(JOB_NAME, "parse_error",
-                                    "Empty voltage array", message,
-                                    deviceId, channelStr, seqStr));
-                    return;
-                }
+            // 提取电压值 → JSON 数组
+            ObjectNode requestBody = objectMapper.createObjectNode();
+            ArrayNode signalArray = requestBody.putArray("signal");
 
-                ButterworthBandpass filter = new ButterworthBandpass(samplingRate, lowCutoff, highCutoff);
-                double[] savedState = filterStateHandle.value();
-                if (savedState != null) {
-                    filter.restoreState(savedState);
-                }
+            int pos = firstComma + 1;
+            int msgLen = message.length();
+            while (pos < msgLen) {
+                int nextComma = message.indexOf(',', pos);
+                if (nextComma < 0) nextComma = msgLen;
+                signalArray.add(Double.parseDouble(message.substring(pos, nextComma)));
+                pos = nextComma + 1;
+            }
+            requestBody.put("filter_type", filterType);
 
-                StringBuilder sb = new StringBuilder(header);
-                for (int i = 0; i < values.length; i++) {
-                    double raw = Double.parseDouble(values[i].trim());
-                    double filtered = filter.apply(raw);
-                    sb.append(',');
-                    sb.append(String.format("%.6f", filtered));
-                }
+            // HTTP POST → filter-gateway /filter
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(filterGatewayUrl + "/filter"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody.toString()))
+                    .timeout(Duration.ofSeconds(15))
+                    .build();
 
-                filterStateHandle.update(filter.getState());
-                out.collect(sb.toString());
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            } catch (Exception e) {
-                ctx.output(ExceptionMessages.EXCEPTION_TAG,
-                        ExceptionMessages.buildErrorJson(JOB_NAME, "filter_error",
-                                e.getClass().getSimpleName() + ": " + e.getMessage(),
-                                message, deviceId, channelStr, seqStr));
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("filter-gateway returned " + response.statusCode()
+                        + ": " + response.body().substring(0, Math.min(200, response.body().length())));
+            }
+
+            JsonNode responseNode = objectMapper.readTree(response.body());
+            JsonNode filteredSignal = responseNode.get("filtered_signal");
+
+            if (filteredSignal == null || !filteredSignal.isArray()) {
+                throw new RuntimeException("Response missing 'filtered_signal' array");
+            }
+
+            // 重建 CSV 消息：header + 滤波后电压
+            StringBuilder sb = new StringBuilder(message.length());
+            sb.append(header);
+            for (int i = 0; i < filteredSignal.size(); i++) {
+                sb.append(',');
+                sb.append(String.format("%.6f", filteredSignal.get(i).asDouble()));
+            }
+
+            requestCount++;
+            if (requestCount <= 5 || requestCount % 500 == 0) {
+                LOG.info("filter-gateway OK: requests={}, samples={}", requestCount, filteredSignal.size());
+            }
+
+            return sb.toString();
+        }
+
+        @Override
+        public void timeout(String input, ResultFuture<String> resultFuture) {
+            resultFuture.complete(Collections.singleton(
+                    ERROR_PREFIX + ExceptionMessages.buildErrorJson(
+                            JOB_NAME, "timeout",
+                            "filter-gateway call timed out (30s)",
+                            input)));
+        }
+    }
+
+    // =========================================================================
+    //  ErrorSplitter — 将 ERROR_PREFIX 标记的消息路由到 exception side output
+    // =========================================================================
+    public static class ErrorSplitter extends ProcessFunction<String, String> {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public void processElement(String value, Context ctx, Collector<String> out) {
+            if (value.startsWith(ERROR_PREFIX)) {
+                ctx.output(ExceptionMessages.EXCEPTION_TAG, value.substring(ERROR_PREFIX.length()));
+            } else {
+                out.collect(value);
             }
         }
     }
 
+    // =========================================================================
+    //  FilteredMessageSerializer — 按 deviceId 分区写入 filtered_topic
+    // =========================================================================
     public static class FilteredMessageSerializer
             implements KafkaRecordSerializationSchema<String> {
         private static final long serialVersionUID = 1L;

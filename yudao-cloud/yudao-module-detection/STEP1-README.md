@@ -40,7 +40,7 @@ yudao-module-detection/
 | `kafka-ui` | `provectuslabs/kafka-ui` | **8089** | Kafka Web 管理界面 |
 | `tdengine` | `tdengine/tdengine:3.3.2.0` | 6030, 6041, **6060** | 时序数据库 + REST API + Explorer |
 | `flink-jobmanager` | `flink:1.18.1` | **8081** | Flink 集群主节点 + Web Dashboard |
-| `flink-taskmanager` | `flink:1.18.1` | — | Flink 工作节点，8 个 task slot |
+| `flink-taskmanager` | `flink:1.18.1` | — | Flink 工作节点，16 个 task slot |
 
 **Kafka 监听器设计：**
 - `PLAINTEXT://:9092` — 容器间通信（Flink Job、kafka-init 等容器用此地址）

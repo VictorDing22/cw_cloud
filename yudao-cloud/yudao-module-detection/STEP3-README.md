@@ -1,124 +1,117 @@
-# 第三步：信号滤波层 — signal-filter-flink-job + signal-save-filtered-flink-job
+# 第三步：滤波预处理层 — 微服务滤波 + 波形实时推送
+
+> 前置条件：`STEP2-EXECUTE.md` 第二步已完成，signal-saveraw-flink-job 正常运行。
+
+```bash
+cd /Users/dingsaier/Desktop/cw_cloud/yudao-cloud/yudao-module-detection
+```
+
+---
 
 ## 概述
 
-本步骤实现了技术方案文档中的 **信号滤波层**：两个新的 Flink Job 协同工作，完成从原始波形到滤波波形的实时处理和持久化。
+本步骤实现技术方案文档 **（3）滤波预处理层**：
 
-核心功能：
-- **带通滤波**：使用 4 阶 Butterworth 带通滤波器（100kHz ~ 900kHz），去除低频机械噪声和高频电子噪声，保留声发射有效频段
-- **滤波数据归档**：将滤波后的波形数据全量写入 TDengine `filtered_data` 超级表
+> signal-filter-flink-Job 消费 raw_topic 原始数据，通过异步调用滤波微服务，完成带通滤波、去噪、基线校正等预处理，将滤波后的干净波形写入 filtered_topic；signal-save-filtered-flink-job 监听 filtered_topic，将滤波后数据归档至 filtered_data 表。存储失败的数据写入 exception_topic 做后续处理。
 
-对应技术方案文档中的数据流位置：
+采用 **方案 B（微服务滤波）**：Flink Job 通过异步 HTTP 调用 `filter-gateway` 网关，网关路由到盛老师的 Kalman/RLS/LS 滤波 API。同时部署 **WebSocket Bridge** 将滤波结果实时推送到前端 detection 页面进行波形展示。
 
 ```
-                       ┌──→ [signal-saveraw-flink-job] ──→ TDengine raw_data (第二步)
-                       │
-Kafka raw_topic ───────┤
-                       │
-                       └──→ [signal-filter-flink-job] ──→ Kafka filtered_topic
-                                                               │
-                                                               └──→ [signal-save-filtered-flink-job] ──→ TDengine filtered_data
-                                                                          ↑ 本步骤实现
+                        ┌──→ [signal-saveraw-flink-job] → TDengine raw_data (第二步)
+                        │
+Kafka raw_topic ────────┤
+   (5 partitions)       │
+                        └──→ [signal-filter-flink-job]
+                               │
+                               │ Flink AsyncDataStream (100 并发)
+                               │ HTTP POST → filter-gateway:8010/filter
+                               ▼
+                         filter-gateway (Docker)
+                            ├─ Kalman → 49.235.44.231:8000
+                            ├─ RLS    → 49.235.44.231:8001
+                            └─ LS     → 49.235.44.231:8002
+                               │
+                         ┌─────┘ 滤波成功
+                         │              滤波失败 / 超时
+                         ▼                    ▼
+                   Kafka filtered_topic   Kafka exception_topic
+                     (5 partitions)          (4 partitions)
+                         │
+                    ┌────┴────┐
+                    ▼         ▼
+    [signal-save-filtered]   [websocket-bridge]
+            │                      │
+            ▼                      ▼
+    TDengine filtered_data    ws://localhost:8083
+                              → detection 页面波形展示
 ```
+
+---
+
+## Kafka Topic 配置
+
+沿用第一步创建的 topic，无需额外操作：
+
+| Topic | Partitions | 用途 |
+|-------|-----------|------|
+| `raw_topic` | 5 | 原始数据（第二步已在消费） |
+| `filtered_topic` | 5 | 滤波后数据（与 raw_topic 对齐，避免空分区） |
+| `exception_topic` | 4 | 异常死信队列（滤波失败 + 存储失败） |
 
 ---
 
 ## 新增 / 修改文件清单
 
 ```
-yudao-module-detection/signal-flink-jobs/
-└── src/main/java/cn/iocoder/yudao/detection/flink/
-    ├── filter/
-    │   └── ButterworthBandpass.java          # 【新增】4阶Butterworth带通滤波器
-    ├── job/
-    │   ├── SignalFilterJob.java              # 【新增】滤波 Flink Job 主类
-    │   └── SignalSaveFilteredJob.java        # 【新增】滤波数据归档 Flink Job
-    └── sink/
-        └── TDengineFilteredSink.java         # 【新增】TDengine filtered_data 批量Sink
-
 yudao-module-detection/
-└── STEP3-README.md                           # 【新增】本文档
-```
+├── docker-compose-infra.yml                          # 【修改】新增 filter-gateway + websocket-bridge
+├── docker/
+│   └── websocket-bridge/
+│       ├── websocket_bridge.py                       # 【新增】CSV→JSON WebSocket 波形推送
+│       └── Dockerfile                                # 【新增】
+├── signal-flink-jobs/
+│   ├── pom.xml                                       # 【修改】新增 Jackson 依赖
+│   └── src/main/java/cn/iocoder/yudao/detection/flink/
+│       └── job/
+│           └── SignalFilterJob.java                  # 【修改】重写为异步 HTTP 调用 filter-gateway
+└── STEP3-README.md                                   # 【修改】本文档
 
-> 本步骤无文件修改，全部为新增。第二步的 `SignalSaveRawJob`、`TDengineRawSink` 等继续正常工作。
+k8s-flink-solution/docker/filter-gateway/             # 【引用】滤波网关（无修改，docker-compose 直接引用）
+```
 
 ---
 
-## 各文件详细说明
+## 各组件详细说明
 
-### 1. `filter/ButterworthBandpass.java` — 4阶 Butterworth 带通滤波器
-
-**算法原理：**
-
-将带通滤波分解为两个级联的 2 阶 Biquad 段：
-1. **2 阶 Butterworth 高通**（截止频率 = lowCutoff）— 去除低频成分
-2. **2 阶 Butterworth 低通**（截止频率 = highCutoff）— 去除高频成分
-
-两级级联后等效为 **4 阶带通滤波器**，衰减斜率 -24dB/octave。
-
-**Biquad 差分方程（Direct Form II Transposed）：**
-
-```
-y[n] = b0·x[n] + b1·x[n-1] + b2·x[n-2] - a1·y[n-1] - a2·y[n-2]
-```
-
-系数通过 **双线性变换（Bilinear Transform）** 从模拟 Butterworth 原型计算，使用 Robert Bristow-Johnson 的标准 Audio EQ Cookbook 公式。
-
-**默认参数（适用于声发射检测）：**
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `samplingRate` | 2,000,000 Hz | 采样率 |
-| `lowCutoff` | 100,000 Hz | 高通截止频率，去除机械振动、工频干扰 |
-| `highCutoff` | 900,000 Hz | 低通截止频率，去除电子噪声、抗混叠 |
-
-**滤波效果：**
-
-| 频率范围 | 处理 |
-|----------|------|
-| < 100 kHz | 衰减（机械振动、50/60Hz 电源干扰） |
-| 100 kHz ~ 900 kHz | 通过（声发射有效频段） |
-| > 900 kHz | 衰减（高频电子噪声） |
-
-**关键设计：**
-- `apply(double x)` — 处理单个样本，有状态调用（维护 IIR 延迟线）
-- `getState()` / `restoreState()` — 支持 Flink 状态序列化/恢复，确保跨消息滤波连续性
-- `reset()` — 可重置状态（新设备/通道启动时）
-
----
-
-### 2. `job/SignalFilterJob.java` — 滤波 Flink Job 主类
+### 1. `SignalFilterJob.java` — 微服务滤波 Flink Job
 
 **数据流拓扑：**
 
 ```
 KafkaSource(raw_topic)
-    → keyBy(deviceId:channelId)       # 按设备+通道分键，每个键独立维护滤波状态
-    → process(BandpassFilterFunction) # 有状态滤波：Butterworth 带通
-    → KafkaSink(filtered_topic)       # 输出滤波后的消息（格式不变）
+  → AsyncDataStream.unorderedWait(AsyncFilterFunction, 30s, 100并发)
+      ├─ 成功: 滤波后 CSV 消息
+      └─ 失败: ERROR_PREFIX 标记
+  → process(ErrorSplitter)
+      ├─ 正常流 → KafkaSink(filtered_topic)
+      └─ 异常流 → KafkaSink(exception_topic)
 ```
 
-**BandpassFilterFunction（核心处理函数）：**
+**AsyncFilterFunction 处理流程：**
 
-继承 `KeyedProcessFunction<String, String, String>`，利用 Flink 的 `ValueState<double[]>` 存储每个 (device, channel) 的 IIR 滤波器延迟线状态（8 个 double: 高通段 x1/x2/y1/y2 + 低通段 x1/x2/y1/y2）。
+1. 解析 CSV 消息头（`deviceId:channel:seq:ts`）
+2. 提取电压数组 → 构建 JSON 请求 `{"signal": [...], "filter_type": "kalman"}`
+3. HTTP POST → `filter-gateway:8010/filter`
+4. 解析响应中的 `filtered_signal` 数组
+5. 重建 CSV 消息：原始 header + 滤波后电压值
+6. 失败/超时 → 包装为 `ExceptionMessages` 错误 JSON → exception_topic
 
-处理流程：
-1. 解析 Kafka 消息的 header（deviceId, channelId, seq, ts）
-2. 从 Flink 状态恢复滤波器延迟线（保证跨片段连续性）
-3. 对每个电压样本调用 `filter.apply(voltage)` 得到滤波值
-4. 重建消息：`header + 滤波后电压数组`
-5. 保存滤波器状态回 Flink State
-6. 输出到 Collector
+**关键设计：**
 
-**输出协议（与输入格式完全一致）：**
-
-```
-DATA-10-LEFT:1:42:1681105991850000000,0.000519,-0.000121,-0.000367,...
-```
-
-**FilteredMessageSerializer：**
-
-自定义 `KafkaRecordSerializationSchema`，从消息中提取 `deviceId` 作为 Kafka record key，确保 filtered_topic 与 raw_topic 使用相同的分区路由策略。
+- 专用线程池（`max(8, CPU*2)` 线程）执行 HTTP 调用，避免阻塞 Flink 算子
+- 最大 100 个并发异步请求（Flink 背压自动调节）
+- 30 秒超时，超时消息自动进入 exception_topic
+- 输出消息格式与输入完全一致，下游 signal-save-filtered-flink-job 无需修改
 
 **启动参数：**
 
@@ -127,157 +120,307 @@ DATA-10-LEFT:1:42:1681105991850000000,0.000519,-0.000121,-0.000367,...
 | args[0] | Kafka broker | `kafka:9092` |
 | args[1] | 输入 topic | `raw_topic` |
 | args[2] | 输出 topic | `filtered_topic` |
-| args[3] | 低截止频率 (Hz) | `100000` |
-| args[4] | 高截止频率 (Hz) | `900000` |
-| args[5] | 采样率 (Hz) | `2000000` |
+| args[3] | filter-gateway URL | `http://filter-gateway:8010` |
+| args[4] | 滤波算法类型 | `kalman` |
+| args[5] | 异常 topic | `exception_topic` |
+
+### 2. `filter-gateway`（Python FastAPI）
+
+来自 `k8s-flink-solution/docker/filter-gateway/`，是盛老师滤波 API 的统一网关。
+
+**核心接口：**
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/filter` | POST | 单通道滤波，接收 `{"signal": [...], "filter_type": "kalman"}` |
+| `/filter/batch` | POST | 多通道批量滤波 |
+| `/health` | GET | 健康检查 + 统计信息 |
+| `/stats` | GET | 调用统计（请求数、耗时、错误数） |
+
+**支持的滤波算法：**
+
+| 算法 | filter_type | 后端地址 |
+|------|-------------|---------|
+| Kalman 滤波 | `kalman` | `http://49.235.44.231:8000/kalman/audio/run` |
+| RLS 递归最小二乘 | `rls` | `http://49.235.44.231:8001/rls/audio/run` |
+| LS 最小二乘 | `ls` | `http://49.235.44.231:8002/ls/audio/run` |
+
+### 3. `SignalSaveFilteredJob.java` — 滤波数据归档 Job
+
+消费 `filtered_topic`，解析并展开电压片段，批量写入 TDengine `filtered_data` 超级表。
+存储失败的数据写入 `exception_topic`。
+
+| 配置 | 值 |
+|------|---|
+| 消费 topic | `filtered_topic` |
+| 消费组 ID | `signal-save-filtered-flink-job` |
+| 目标超级表 | `filtered_data`（子表前缀 `f_`） |
+| 批量大小 | 5000 条记录 |
+
+### 4. `websocket-bridge` — 波形实时推送服务
+
+从 Kafka 消费 CSV 格式波形消息，解析为 JSON 后通过 WebSocket 推送给前端。
+
+**功能特性：**
+
+| 特性 | 说明 |
+|------|------|
+| 双 topic 消费 | 同时消费 `filtered_topic` + `raw_topic`，支持原始/滤波对比展示 |
+| 智能节流 | 每个 device:channel:type 最多 200ms 推送一次（5 帧/秒），避免带宽过载 |
+| 订阅过滤 | 客户端可订阅特定设备/通道，未订阅时接收全部 |
+| 自动清理 | 断线客户端自动注销 |
+
+**WebSocket 推送 JSON 格式：**
+
+```json
+{
+  "type": "filtered-signal",
+  "deviceId": "DATA-10-LEFT",
+  "channelId": 1,
+  "seq": 42,
+  "timestamp": 1681105991850000000,
+  "samples": [0.000519, -0.000121, ...],
+  "sampleCount": 1000,
+  "displayCount": 500
+}
+```
+
+**客户端订阅协议：**
+
+```javascript
+// 连接
+const ws = new WebSocket('ws://localhost:8083/realtime');
+
+// 订阅特定设备+通道
+ws.send(JSON.stringify({
+  type: 'subscribe',
+  deviceId: 'DATA-10-LEFT',
+  channelId: 1
+}));
+
+// 接收波形数据
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'filtered-signal') {
+    // 渲染滤波后波形
+    renderWaveform(data.samples);
+  } else if (data.type === 'raw-signal') {
+    // 渲染原始波形（对比用）
+    renderRawWaveform(data.samples);
+  }
+};
+```
 
 ---
 
-### 3. `job/SignalSaveFilteredJob.java` — 滤波数据归档 Job
+## 部署步骤
 
-与第二步的 `SignalSaveRawJob` 结构完全相同，区别在于：
-- 消费 `filtered_topic`（而非 `raw_topic`）
-- 写入 `filtered_data` 表（而非 `raw_data`）
-- 消费组 ID: `signal-save-filtered-flink-job`
-
-复用 `RawSignalRecord` POJO（voltage 字段存储滤波后电压值）。
-
-**启动参数：**
-
-| 位置 | 参数 | 默认值 |
-|------|------|--------|
-| args[0] | Kafka broker | `kafka:9092` |
-| args[1] | TDengine URL | `jdbc:TAOS-RS://tdengine:6041/yudao_detection` |
-| args[2] | 批量大小 | `5000` |
-| args[3] | Kafka topic | `filtered_topic` |
-
----
-
-### 4. `sink/TDengineFilteredSink.java` — TDengine 滤波数据批量 Sink
-
-与 `TDengineRawSink` 结构相同，针对 `filtered_data` 表调整：
-
-| 差异 | TDengineRawSink | TDengineFilteredSink |
-|------|-----------------|----------------------|
-| 目标超级表 | `raw_data` | `filtered_data` |
-| 子表前缀 | `t_` | `f_` |
-| 列 | ts, voltage, sampling, seq | ts, voltage, seq（无 sampling 列） |
-| SQL 示例 | `INSERT INTO t_dev_1 USING raw_data TAGS(...)` | `INSERT INTO f_dev_1 USING filtered_data TAGS(...)` |
-
----
-
-## 部署与运行
-
-### 构建 & 提交（3 个 Job）
+### 1. 启动 filter-gateway + websocket-bridge
 
 ```bash
-# 1. 构建
-cd yudao-module-detection/signal-flink-jobs
-mvn clean package
+# 重建并启动新增的服务（不影响已运行的 kafka/tdengine/flink）
+docker compose -f docker-compose-infra.yml up -d --build filter-gateway websocket-bridge
+```
 
-# 2. 部署 JAR
-docker cp target/signal-flink-jobs-1.0.0.jar detection-flink-jobmanager:/opt/flink/usrlib/
-docker cp target/signal-flink-jobs-1.0.0.jar detection-flink-taskmanager:/opt/flink/usrlib/
+确认状态：
 
-# 3. 提交 Job 1: 原始数据归档
+```bash
+docker compose -f docker-compose-infra.yml ps
+```
+
+| 容器 | 状态 |
+|------|------|
+| `detection-filter-gateway` | Up (healthy) |
+| `detection-ws-bridge` | Up |
+
+验证 filter-gateway 可用：
+
+```bash
+curl http://localhost:8010/health
+```
+
+### 2. 构建 + 部署 Flink JAR
+
+```bash
+# 构建（包含新增的 Jackson 依赖）
+bash scripts/deploy-flink-job.sh
+```
+
+### 3. 提交滤波 Flink Job
+
+```bash
+# Job 2: 微服务滤波（raw_topic → filter-gateway → filtered_topic）
 docker exec detection-flink-jobmanager /opt/flink/bin/flink run -d \
-  -c cn.iocoder.yudao.detection.flink.job.SignalSaveRawJob \
-  /opt/flink/usrlib/signal-flink-jobs-1.0.0.jar \
-  kafka:9092 "jdbc:TAOS-RS://tdengine:6041/yudao_detection" 2000 raw_topic
-
-# 4. 提交 Job 2: 带通滤波
-docker exec detection-flink-jobmanager /opt/flink/bin/flink run -d \
+  -p 5 \
   -c cn.iocoder.yudao.detection.flink.job.SignalFilterJob \
   /opt/flink/usrlib/signal-flink-jobs-1.0.0.jar \
-  kafka:9092 raw_topic filtered_topic 100000 900000 2000000
+  kafka:9092 raw_topic filtered_topic http://filter-gateway:8010 kalman exception_topic
 
-# 5. 提交 Job 3: 滤波数据归档
+# Job 3: 滤波数据归档（filtered_topic → TDengine filtered_data）
 docker exec detection-flink-jobmanager /opt/flink/bin/flink run -d \
+  -p 5 \
   -c cn.iocoder.yudao.detection.flink.job.SignalSaveFilteredJob \
   /opt/flink/usrlib/signal-flink-jobs-1.0.0.jar \
-  kafka:9092 "jdbc:TAOS-RS://tdengine:6041/yudao_detection" 2000 filtered_topic
+  kafka:9092 "jdbc:TAOS-RS://tdengine:6041/yudao_detection" 5000 filtered_topic exception_topic
 ```
 
----
+> **切换滤波算法**：将最后的 `kalman` 改为 `rls` 或 `ls` 即可切换滤波策略。
 
-## 验证结果
-
-### 端到端测试
+### 4. 发送测试数据
 
 ```bash
-# 发送 20 个片段（3通道 × 20seq × 500样本 = 30,000 条预期）
-python3 scripts/simulate_edge_device.py --filter "data-10-left" --burst 20 --frag-size 500
+# 短时测试（约 26 秒）
+python3 scripts/simulate_edge_device.py --interval 0 --burst 200
 ```
-
-### Flink Dashboard 状态
-
-| Job | 状态 | Flink JobID |
-|-----|------|-------------|
-| signal-saveraw-flink-job | RUNNING | bed7e07d... |
-| signal-filter-flink-job | RUNNING | 238d6f7d... |
-| signal-save-filtered-flink-job | RUNNING | fb79e4ac... |
-
-### TDengine 数据验证
-
-| 检查项 | 结果 |
-|--------|------|
-| raw_data 子表创建 | `t_data_10_left_1/2/3` (3张) |
-| filtered_data 子表创建 | `f_data_10_left_1/2/3` (3张) |
-| raw_data 记录数 | 28,001 |
-| filtered_data 记录数 | 28,001 |
-| 时间戳一一对应 | 确认（纳秒精度同步） |
-
-### 滤波效果对比
-
-同一通道（t_data_10_left_1 vs f_data_10_left_1）前 5 个样本：
-
-| 时间戳 | 原始电压 (V) | 滤波电压 (V) |
-|--------|-------------|-------------|
-| .850321920 | 0.0008100 | 0.0005190 |
-| .850322420 | 0.0003410 | 0.0002190 |
-| .850322920 | 0.0004970 | -0.0001210 |
-| .850323420 | -0.0002840 | -0.0003670 |
-| .850323920 | 0.0006540 | -0.0000520 |
-
-**滤波分析：**
-- 原始信号有明显的正值偏移（直流分量 / 低频漂移），多数值为正
-- 滤波后信号围绕零轴对称波动，说明 **高通段有效去除了低频分量**
-- 信号幅度略有减小，说明高频噪声也被 **低通段衰减**
-- 带通滤波器正确保留了 100kHz ~ 900kHz 的声发射有效频段
 
 ---
 
-## 当前系统架构（3 个 Flink Job 协同）
+## 验证
+
+### Flink Job 运行状态
+
+```bash
+docker exec detection-flink-jobmanager /opt/flink/bin/flink list 2>/dev/null
+```
+
+| Job | 状态 |
+|-----|------|
+| signal-saveraw-flink-job | RUNNING |
+| signal-filter-flink-job | RUNNING |
+| signal-save-filtered-flink-job | RUNNING |
+
+### filter-gateway 调用统计
+
+```bash
+curl http://localhost:8010/stats
+```
+
+应看到 `total_requests` 持续增长，`errors` 为 0。
+
+### Kafka lag 监控
+
+```bash
+# 滤波 Job
+docker exec detection-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe --group signal-filter-flink-job 2>/dev/null | grep raw_topic
+
+# 归档 Job
+docker exec detection-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe --group signal-save-filtered-flink-job 2>/dev/null | grep filtered_topic
+```
+
+### TDengine 写入验证
+
+```bash
+# filtered_data 记录数
+docker exec detection-tdengine taos -s \
+  "USE yudao_detection; SELECT COUNT(*) FROM filtered_data;"
+
+# 子表列表
+docker exec detection-tdengine taos -s \
+  "USE yudao_detection; SHOW TABLES;" | grep "^f_"
+
+# 最新 5 条
+docker exec detection-tdengine taos -s \
+  "USE yudao_detection; SELECT * FROM filtered_data ORDER BY ts DESC LIMIT 5;"
+```
+
+### exception_topic 检查
+
+```bash
+# 查看是否有异常消息（正常情况应为空）
+docker exec detection-kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic exception_topic \
+  --from-beginning --timeout-ms 3000 2>/dev/null | head -5
+```
+
+### WebSocket 波形验证
+
+```bash
+# 命令行测试 WebSocket 连接
+python3 -c "
+import asyncio, websockets, json
+async def test():
+    async with websockets.connect('ws://localhost:8083/realtime') as ws:
+        for i in range(5):
+            msg = json.loads(await ws.recv())
+            print(f'{msg[\"type\"]}  device={msg.get(\"deviceId\")}  ch={msg.get(\"channelId\")}  samples={msg.get(\"displayCount\")}')
+asyncio.run(test())
+"
+```
+
+应看到 `filtered-signal` 和 `raw-signal` 交替输出。
+
+---
+
+## 系统架构（3 个 Flink Job + 2 个微服务）
 
 ```
-                                          Flink Cluster (Docker)
-                                   ┌─────────────────────────────────┐
-                                   │                                 │
-边端设备 (模拟器)                   │  signal-saveraw-flink-job       │
-      │                            │  raw_topic → TDengine raw_data  │
-      ▼                            │                                 │
-Kafka raw_topic ──────────────────▶│  signal-filter-flink-job        │
-      (8 partitions)               │  raw_topic → 带通滤波 →         │
-                                   │  → Kafka filtered_topic         │
-                                   │                                 │
-                                   │  signal-save-filtered-flink-job │
-                                   │  filtered_topic →               │
-                                   │  TDengine filtered_data         │
-                                   └─────────────────────────────────┘
+                                Flink Cluster (Docker)
+                         ┌──────────────────────────────────┐
+                         │                                  │
+边端设备 (模拟器)         │  signal-saveraw-flink-job        │
+      │                  │  raw_topic → TDengine raw_data   │
+      ▼                  │                                  │
+Kafka raw_topic ────────▶│  signal-filter-flink-job         │
+   (5 partitions)        │  raw_topic → HTTP async ──┐      │
+                         │                           │      │
+                         │  signal-save-filtered     │      │
+                         │  filtered_topic →         │      │
+                         │  TDengine filtered_data   │      │
+                         └──────────────────────┬────┘      │
+                                                │           │
+           ┌────────────────────────────────────┘           │
+           ▼                                                │
+    filter-gateway (Docker :8010)                           │
+    → Kalman/RLS/LS API (49.235.44.231)                     │
+           │                                                │
+           ▼                                                │
+    Kafka filtered_topic (8 partitions)                     │
+           │                                                │
+           ▼                                                │
+    websocket-bridge (Docker :8083) ──→ detection 页面       │
+                                                            │
+                   异常流 → exception_topic                  │
+                                                            │
 
 可观测:
-  Flink Dashboard  → http://localhost:8081
-  Kafka UI         → http://localhost:8089
-  TDengine Explorer → http://localhost:6060
+  Flink Dashboard    → http://localhost:8081
+  Kafka UI           → http://localhost:8089
+  TDengine Explorer  → http://localhost:6060
+  Filter Gateway     → http://localhost:8010/health
+  WebSocket          → ws://localhost:8083/realtime
+```
+
+---
+
+## 回退到第二阶段
+
+```bash
+# 取消第三步的 Flink Job（保留 signal-saveraw-flink-job）
+docker exec detection-flink-jobmanager /opt/flink/bin/flink list 2>/dev/null \
+  | grep -E "signal-filter|signal-save-filtered" | awk '{print $4}' \
+  | xargs -I{} docker exec detection-flink-jobmanager /opt/flink/bin/flink cancel {}
+
+# 停止 filter-gateway + websocket-bridge
+docker compose -f docker-compose-infra.yml stop filter-gateway websocket-bridge
+
+# 清空 filtered_data（保留表结构）
+docker exec detection-tdengine taos -s \
+  "USE yudao_detection; DELETE FROM filtered_data;"
 ```
 
 ---
 
 ## 下一步
 
-按技术方案文档，后续需要实现：
+按技术方案文档 **（4）异常检测与特征计算层**，后续需要实现：
 
-1. **`signal-anomaly-flink-job`** — 消费 `filtered_topic`，对滤波后的波形进行：
-   - **特征提取**：amplitude, energy, area, rise_time, duration, counts, RA, AF 等声发射特征参数
-   - **异常检测**：基于能量阈值 / 统计阈值判定异常事件
-   - 输出到 `anomaly_topic` + TDengine `feature_data` 表
+1. **signal-anomaly-flink-job** — 消费 `filtered_topic`，异步调用异常检测微服务：
+   - 特征计算：amplitude, energy, area, skewness, rise_time, duration, counts, RA, AF
+   - 异常判断：基于能量阈值 / AI 模型
+   - 输出到 `anomaly_topic`（5 partitions）+ TDengine `feature_data` 表
+2. **定位服务** — 监听 `anomaly_topic`，基于 TDOA 到达时间差算法实现缺陷定位
+3. **告警/展示服务** — 监听 `anomaly_topic`，波形可视化 + 告警推送 + TDengine 归档

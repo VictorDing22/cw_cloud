@@ -121,7 +121,7 @@ docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh \
 | 检查项 | 验证命令 | 期望结果 |
 |--------|---------|---------|
 | 容器全部运行 | `docker compose -f docker-compose-infra.yml ps` | 5 个容器 Up |
-| Kafka 4 个 topic | `docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list` | 4 个 topic，raw_topic 为 5 partitions |
+| Kafka 4 个 topic | `docker exec detection-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list` | 4 个 topic，均为 5 partitions（exception_topic 4） |
 | TDengine 4 张超级表 | `docker exec detection-tdengine taos -s "USE yudao_detection; SHOW STABLES;"` | 4 row(s) |
 | Kafka UI 可访问 | 浏览器打开 http://localhost:8089 | 页面正常 |
 | Flink Dashboard 可访问 | 浏览器打开 http://localhost:8081 | 页面正常 |

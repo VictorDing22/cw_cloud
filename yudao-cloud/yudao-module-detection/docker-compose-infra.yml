@@ -47,8 +47,8 @@ services:
       - |
         echo '>>> Creating detection Kafka topics...'
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic raw_topic --partitions 5 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered_topic --partitions 8 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic anomaly_topic --partitions 8 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic filtered_topic --partitions 5 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic anomaly_topic --partitions 5 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic exception_topic --partitions 4 --replication-factor 1
         echo '>>> All topics:'
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
@@ -151,12 +151,63 @@ services:
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 8
+        taskmanager.numberOfTaskSlots: 16
         taskmanager.memory.process.size: 2048m
         state.backend: hashmap
         state.checkpoints.dir: file:///opt/flink/checkpoints
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - detection-network
+
+  # ============================================================
+  #  Filter Gateway — 滤波微服务网关 (盛老师 Kalman/RLS/LS API)
+  #  API: http://localhost:8010/filter
+  # ============================================================
+  filter-gateway:
+    build:
+      context: ../../k8s-flink-solution/docker/filter-gateway
+      dockerfile: Dockerfile
+    container_name: detection-filter-gateway
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      KALMAN_SERVICE_URL: "http://49.235.44.231:8000"
+      RLS_SERVICE_URL: "http://49.235.44.231:8001"
+      LS_SERVICE_URL: "http://49.235.44.231:8002"
+    networks:
+      - detection-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8010/health\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  #  WebSocket Bridge — 波形实时推送 (filtered_topic → WebSocket)
+  #  ws://localhost:8083/realtime
+  # ============================================================
+  websocket-bridge:
+    build:
+      context: ./docker/websocket-bridge
+      dockerfile: Dockerfile
+    container_name: detection-ws-bridge
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      KAFKA_BROKERS: "kafka:9092"
+      FILTERED_TOPIC: "filtered_topic"
+      RAW_TOPIC: "raw_topic"
+      WS_PORT: "8083"
+      THROTTLE_MS: "200"
+      INCLUDE_RAW: "true"
+      MAX_DISPLAY_SAMPLES: "500"
+    depends_on:
+      kafka:
+        condition: service_healthy
     networks:
       - detection-network
 
