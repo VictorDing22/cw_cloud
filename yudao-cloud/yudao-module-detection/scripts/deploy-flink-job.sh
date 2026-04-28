@@ -26,18 +26,32 @@ submit_job() {
   $FLINK run -d -p "$PARALLELISM" -c "$class" "$REMOTE_JAR" "$@"
 }
 
-echo "=== [1/3] 构建 fat JAR ==="
+echo "=== [1/4] 构建 fat JAR ==="
 (cd signal-flink-jobs && mvn clean package -q)
 ls -lh "$JAR_PATH"
 
-echo "=== [2/3] 部署到 Flink 容器 ==="
+echo "=== [2/4] 部署到 Flink 容器 ==="
 for c in detection-flink-jobmanager detection-flink-taskmanager; do
   docker exec "$c" mkdir -p /opt/flink/usrlib /opt/flink/checkpoints
   docker exec "$c" chmod 777 /opt/flink/checkpoints
   docker cp "$JAR_PATH" "$c:$REMOTE_JAR"
 done
 
-echo "=== [3/3] 提交 Flink Job（并行度: ${PARALLELISM}）==="
+echo "=== [3/4] 取消已有 Job ==="
+for attempt in 1 2; do
+  RUNNING_JOBS=$($FLINK list 2>/dev/null | grep RUNNING | awk '{print $4}' || true)
+  if [[ -z "$RUNNING_JOBS" ]]; then
+    [[ $attempt -eq 1 ]] && echo "  (无运行中的 Job)"
+    break
+  fi
+  for jid in $RUNNING_JOBS; do
+    echo "  ✕ cancel $jid"
+    $FLINK cancel "$jid" 2>/dev/null || true
+  done
+  sleep 3
+done
+
+echo "=== [4/4] 提交 Flink Job（并行度: ${PARALLELISM}）==="
 
 case "$MODE" in
   --all|--step3)
@@ -45,7 +59,7 @@ case "$MODE" in
       kafka:9092 "jdbc:TAOS-RS://tdengine:6041/yudao_detection" "$BATCH_SIZE" raw_topic exception_topic
 
     submit_job cn.iocoder.yudao.detection.flink.job.SignalFilterJob \
-      kafka:9092 raw_topic filtered_topic http://filter-gateway:8010 "$FILTER_TYPE" exception_topic
+      kafka:9092 raw_topic filtered_topic http://kalman-service:8000 "$FILTER_TYPE" exception_topic
 
     submit_job cn.iocoder.yudao.detection.flink.job.SignalSaveFilteredJob \
       kafka:9092 "jdbc:TAOS-RS://tdengine:6041/yudao_detection" "$BATCH_SIZE" filtered_topic exception_topic

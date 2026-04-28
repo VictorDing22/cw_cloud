@@ -161,25 +161,21 @@ services:
       - detection-network
 
   # ============================================================
-  #  Filter Gateway — 滤波微服务网关 (盛老师 Kalman/RLS/LS API)
-  #  API: http://localhost:8010/filter
+  #  Kalman Service — 本地 Kalman 滤波算法服务 (Flink 直连)
+  #  API: http://kalman-service:8000/filter
   # ============================================================
-  filter-gateway:
+  kalman-service:
     build:
-      context: ../../k8s-flink-solution/docker/filter-gateway
+      context: ./docker/kalman-service
       dockerfile: Dockerfile
-    container_name: detection-filter-gateway
+    container_name: detection-kalman-service
     restart: unless-stopped
     ports:
-      - "8010:8010"
-    environment:
-      KALMAN_SERVICE_URL: "http://49.235.44.231:8000"
-      RLS_SERVICE_URL: "http://49.235.44.231:8001"
-      LS_SERVICE_URL: "http://49.235.44.231:8002"
+      - "8000:8000"
     networks:
       - detection-network
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8010/health\")'"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
       interval: 10s
       timeout: 5s
       retries: 5

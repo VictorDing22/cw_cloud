@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Detection Waveform Monitor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0a0a0f;color:#e0e0e0;padding:16px}
+h1{font-size:18px;color:#8ab4f8;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.status{font-size:12px;padding:3px 10px;border-radius:10px;font-weight:400}
+.status.connected{background:#1b5e20;color:#81c784}
+.status.disconnected{background:#b71c1c;color:#ef9a9a}
+.stats{display:flex;gap:16px;margin-bottom:12px;font-size:13px;color:#999}
+.stats span{color:#8ab4f8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:#16161e;border:1px solid #2a2a3a;border-radius:8px;padding:12px;min-height:180px}
+.card-title{font-size:13px;color:#aaa;margin-bottom:8px;display:flex;justify-content:space-between}
+.card-title .seq{color:#666;font-size:11px}
+canvas{width:100%;height:140px;display:block;border-radius:4px;background:#0d0d14}
+.legend{display:flex;gap:12px;margin-top:6px;font-size:11px;color:#888}
+.legend i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.raw-color{background:#ff6b6b}
+.filtered-color{background:#51cf66}
+</style>
+</head>
+<body>
+<h1>Waveform Monitor <span class="status disconnected" id="status">disconnected</span></h1>
+<div class="stats">
+  <div>Messages: <span id="msgCount">0</span></div>
+  <div>Channels: <span id="chCount">0</span></div>
+  <div>Samples/msg: <span id="sampleCount">-</span></div>
+</div>
+<div class="legend">
+  <div><i class="raw-color"></i>Raw</div>
+  <div><i class="filtered-color"></i>Filtered</div>
+</div>
+<div class="grid" id="grid"></div>
+
+<script>
+const channels = {};
+let msgCount = 0;
+const wsUrl = `ws://${location.host}`;
+let ws;
+
+function connect() {
+  ws = new WebSocket(wsUrl);
+  const el = document.getElementById('status');
+  ws.onopen = () => { el.textContent = 'connected'; el.className = 'status connected'; };
+  ws.onclose = () => { el.textContent = 'disconnected'; el.className = 'status disconnected'; setTimeout(connect, 2000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'welcome') return;
+    msgCount++;
+    document.getElementById('msgCount').textContent = msgCount;
+    const key = `${d.deviceId}:${d.channelId}`;
+    if (!channels[key]) {
+      channels[key] = { raw: null, filtered: null, el: createCard(key) };
+      document.getElementById('chCount').textContent = Object.keys(channels).length;
+    }
+    const ch = channels[key];
+    if (d.type === 'raw-signal') ch.raw = d.samples;
+    else if (d.type === 'filtered-signal') ch.filtered = d.samples;
+    document.getElementById('sampleCount').textContent = d.displayCount;
+    ch.el.querySelector('.seq').textContent = `seq=${d.seq}`;
+    drawWaveform(ch);
+  };
+}
+
+function createCard(key) {
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.innerHTML = `<div class="card-title"><span>${key}</span><span class="seq"></span></div><canvas></canvas>`;
+  document.getElementById('grid').appendChild(div);
+  return div;
+}
+
+function drawWaveform(ch) {
+  const canvas = ch.el.querySelector('canvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0, 0, w, h);
+
+  function draw(samples, color) {
+    if (!samples || samples.length < 2) return;
+    let min = Infinity, max = -Infinity;
+    for (const v of samples) { if (v < min) min = v; if (v > max) max = v; }
+    const range = max - min || 1;
+    const pad = 4;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    const step = w / (samples.length - 1);
+    for (let i = 0; i < samples.length; i++) {
+      const x = i * step;
+      const y = pad + (1 - (samples[i] - min) / range) * (h - 2 * pad);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  draw(ch.raw, '#ff6b6b');
+  draw(ch.filtered, '#51cf66');
+}
+
+connect();
+</script>
+</body>
+</html>
