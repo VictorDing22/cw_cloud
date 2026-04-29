@@ -13,9 +13,10 @@ cd /Users/dingsaier/Desktop/cw_cloud/yudao-cloud/yudao-module-detection
 | 参数 | 值 | 说明 |
 |---|---|---|
 | TaskManager slots | **20** | 4 Job x 5 并行度 = 20 slots |
-| AMP_THRESHOLD | **0.01** | 峰值超过此值标记异常（实测数据 0.001~0.012V） |
-| ENERGY_THRESHOLD | **0.1** | 能量超过此值标记异常 |
-| COUNTS_THRESHOLD | **3** | 振铃次数超过此值标记异常 |
+| AMP_THRESHOLD | **0.009** | 峰值阈值（mean+3σ, GB/T 18182） |
+| ENERGY_THRESHOLD | **0.005** | 能量阈值（mean+3σ） |
+| COUNTS_THRESHOLD | **72** | 振铃计数阈值（mean+2σ） |
+| 告警分级 | **3 级** | L1 关注(>3σ) / L2 预警(>4σ) / L3 报警(>5σ) |
 | 特征计算 | **Flink 内** | 纯 Java 计算，零 HTTP 调用 |
 
 ---

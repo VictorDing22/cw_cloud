@@ -44,9 +44,9 @@ public class SignalAnomalyJob {
         String inputTopic       = args.length > 3 ? args[3] : "filtered_topic";
         String anomalyTopic     = args.length > 4 ? args[4] : "anomaly_topic";
         String exceptionTopic   = args.length > 5 ? args[5] : ExceptionMessages.DEFAULT_EXCEPTION_TOPIC;
-        double ampThreshold     = args.length > 6 ? Double.parseDouble(args[6]) : 0.01;
-        double energyThreshold  = args.length > 7 ? Double.parseDouble(args[7]) : 0.1;
-        int    countsThreshold  = args.length > 8 ? Integer.parseInt(args[8]) : 3;
+        double ampThreshold     = args.length > 6 ? Double.parseDouble(args[6]) : 0.009;
+        double energyThreshold  = args.length > 7 ? Double.parseDouble(args[7]) : 0.005;
+        int    countsThreshold  = args.length > 8 ? Integer.parseInt(args[8]) : 72;
 
         LOG.info("{} starting: kafka={}, in={}, anomalyOut={}, ampTh={}, energyTh={}, countsTh={}",
                 JOB_NAME, kafkaBroker, inputTopic, anomalyTopic,
@@ -166,15 +166,18 @@ public class SignalAnomalyJob {
                 if (feat.amplitude >= ampThreshold) {
                     isError = 1;
                     errorType = "amplitude";
-                    alertLevel = feat.amplitude >= ampThreshold * 2 ? 2 : 1;
+                    alertLevel = feat.amplitude >= ampThreshold * 1.67 ? 3
+                               : feat.amplitude >= ampThreshold * 1.33 ? 2 : 1;
                 } else if (feat.energy >= energyThreshold) {
                     isError = 1;
                     errorType = "energy";
-                    alertLevel = feat.energy >= energyThreshold * 2 ? 2 : 1;
+                    alertLevel = feat.energy >= energyThreshold * 1.67 ? 3
+                               : feat.energy >= energyThreshold * 1.33 ? 2 : 1;
                 } else if (feat.counts >= countsThreshold) {
                     isError = 1;
                     errorType = "counts";
-                    alertLevel = 1;
+                    alertLevel = feat.counts >= countsThreshold * 1.67 ? 3
+                               : feat.counts >= countsThreshold * 1.33 ? 2 : 1;
                 }
 
                 StringBuilder sb = new StringBuilder(256);

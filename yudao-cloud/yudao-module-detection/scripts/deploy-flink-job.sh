@@ -9,9 +9,9 @@ JAR_NAME="signal-flink-jobs-1.0.0.jar"
 JAR_PATH="signal-flink-jobs/target/$JAR_NAME"
 REMOTE_JAR="/opt/flink/usrlib/$JAR_NAME"
 MODE="${1:---step2}"
-AMP_THRESHOLD="${AMP_THRESHOLD:-0.01}"
-ENERGY_THRESHOLD="${ENERGY_THRESHOLD:-0.1}"
-COUNTS_THRESHOLD="${COUNTS_THRESHOLD:-3}"
+AMP_THRESHOLD="${AMP_THRESHOLD:-0.009}"
+ENERGY_THRESHOLD="${ENERGY_THRESHOLD:-0.005}"
+COUNTS_THRESHOLD="${COUNTS_THRESHOLD:-72}"
 
 if [[ "$MODE" == "--help" || "$MODE" == "-h" ]]; then
   echo "Usage: $0 [--step2|--step3|--step4]"
