@@ -8,7 +8,7 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
     kafka-python \
     websockets
 
-COPY websocket_bridge.py index.html ./
+COPY websocket_bridge.py index.html monitor.html ./
 
 EXPOSE 8083
 

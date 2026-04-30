@@ -241,18 +241,16 @@ async def kafka_loop():
             last_log = now
 
 
-HTML_PATH = pathlib.Path(__file__).parent / "index.html"
-HTML_CONTENT = HTML_PATH.read_bytes() if HTML_PATH.exists() else b"<h1>WebSocket Bridge</h1>"
+HTML_DIR = pathlib.Path(__file__).parent
+HTML_CONTENT = (HTML_DIR / "index.html").read_bytes() if (HTML_DIR / "index.html").exists() else b"<h1>WebSocket Bridge</h1>"
+MONITOR_CONTENT = (HTML_DIR / "monitor.html").read_bytes() if (HTML_DIR / "monitor.html").exists() else None
 
 
 def http_handler(connection, request):
-    """非 WebSocket 请求返回波形监控页面"""
     if request.headers.get("Upgrade", "").lower() != "websocket":
-        return WsResponse(
-            200, "OK",
-            WsHeaders([("Content-Type", "text/html; charset=utf-8")]),
-            HTML_CONTENT,
-        )
+        if MONITOR_CONTENT and request.path in ("/monitor", "/monitor/"):
+            return WsResponse(200, "OK", WsHeaders([("Content-Type", "text/html; charset=utf-8")]), MONITOR_CONTENT)
+        return WsResponse(200, "OK", WsHeaders([("Content-Type", "text/html; charset=utf-8")]), HTML_CONTENT)
     return None
 
 

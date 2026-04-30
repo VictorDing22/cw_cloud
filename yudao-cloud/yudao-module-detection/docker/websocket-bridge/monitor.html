@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>声发射工业检测平台 — 实时监控</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background:#f0f2f5; color:#303133; }
+
+.header { background:linear-gradient(135deg,#1a1a2e,#16213e); color:#fff; padding:16px 32px; display:flex; justify-content:space-between; align-items:center; }
+.header h1 { font-size:20px; font-weight:600; }
+.header .status { display:flex; align-items:center; gap:12px; font-size:14px; }
+.dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.dot.on { background:#67c23a; box-shadow:0 0 6px #67c23a; }
+.dot.off { background:#f56c6c; }
+
+.toolbar { padding:12px 32px; background:#fff; border-bottom:1px solid #ebeef5; display:flex; align-items:center; gap:16px; }
+.toolbar select { padding:6px 12px; border:1px solid #dcdfe6; border-radius:4px; font-size:14px; }
+.toolbar button { padding:6px 16px; border:none; border-radius:4px; cursor:pointer; font-size:14px; }
+.btn-primary { background:#409eff; color:#fff; }
+.btn-danger { background:#f56c6c; color:#fff; }
+.btn-primary:hover { background:#66b1ff; }
+.btn-danger:hover { background:#f78989; }
+
+.container { max-width:1400px; margin:16px auto; padding:0 16px; }
+
+/* Alert bar */
+.alert-section { background:#fff; border-radius:8px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+.alert-title { font-size:16px; font-weight:600; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
+.alert-badge { background:#f56c6c; color:#fff; border-radius:10px; padding:2px 8px; font-size:12px; min-width:20px; text-align:center; }
+.alert-list { max-height:180px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+.alert-empty { text-align:center; color:#909399; padding:24px; }
+.alert-item { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:6px; border:1px solid #ebeef5; font-size:13px; transition:all .3s; }
+.alert-item:first-child { border-left:4px solid #f56c6c; background:rgba(245,108,108,.06); animation:pulse 2s infinite; }
+.alert-item:hover { box-shadow:0 2px 8px rgba(0,0,0,.08); }
+@keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(245,108,108,.3)} 50%{box-shadow:0 0 0 6px transparent} }
+.tag { padding:2px 8px; border-radius:3px; font-size:12px; font-weight:600; color:#fff; }
+.tag-l1 { background:#909399; }
+.tag-l2 { background:#e6a23c; }
+.tag-l3 { background:#f56c6c; }
+.alert-time { color:#909399; font-family:monospace; font-size:12px; }
+.alert-label { font-weight:500; }
+.alert-val { color:#606266; }
+.alert-val strong { color:#f56c6c; }
+
+/* Charts */
+.charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.chart-card { background:#fff; border-radius:8px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+.chart-card h3 { font-size:14px; font-weight:600; margin-bottom:4px; text-align:center; color:#303133; }
+.chart-box { width:100%; height:280px; }
+
+/* Stats bar */
+.stats-bar { display:flex; gap:12px; margin-bottom:16px; }
+.stat-card { flex:1; background:#fff; border-radius:8px; padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,.06); text-align:center; }
+.stat-card .num { font-size:24px; font-weight:700; color:#409eff; }
+.stat-card .label { font-size:12px; color:#909399; margin-top:4px; }
+
+@media(max-width:768px) { .charts-grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>声发射工业检测平台 — 实时流水线监控</h1>
+  <div class="status">
+    <span>WebSocket</span>
+    <span class="dot" id="wsDot"></span>
+    <span id="wsLabel">未连接</span>
+    <span style="margin-left:12px" id="deviceLabel">—</span>
+  </div>
+</div>
+
+<div class="toolbar">
+  <label>设备：<select id="deviceSelect"><option value="">全部</option></select></label>
+  <label>通道：<select id="channelSelect"><option value="">全部</option><option value="1">CH1</option><option value="2">CH2</option><option value="3">CH3</option></select></label>
+  <button class="btn-primary" id="btnConnect" onclick="toggle()">连接</button>
+  <span style="margin-left:auto;font-size:13px;color:#909399" id="msgRate">—</span>
+</div>
+
+<div class="container">
+  <div class="stats-bar">
+    <div class="stat-card"><div class="num" id="statMsg">0</div><div class="label">接收消息</div></div>
+    <div class="stat-card"><div class="num" id="statAlert" style="color:#f56c6c">0</div><div class="label">告警次数</div></div>
+    <div class="stat-card"><div class="num" id="statDevice">0</div><div class="label">在线设备</div></div>
+    <div class="stat-card"><div class="num" id="statSamples">0</div><div class="label">采样点</div></div>
+  </div>
+
+  <div class="alert-section">
+    <div class="alert-title"><span>实时异常监测告警</span><span class="alert-badge" id="alertBadge" style="display:none">0</span></div>
+    <div class="alert-list" id="alertList"><div class="alert-empty">监测中，暂无异常数据</div></div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-card"><h3>时域波形对比</h3><div class="chart-box" id="chartTime"></div></div>
+    <div class="chart-card"><h3>频域分析(FFT)</h3><div class="chart-box" id="chartFFT"></div></div>
+    <div class="chart-card"><h3>滤波误差分布</h3><div class="chart-box" id="chartError"></div></div>
+    <div class="chart-card"><h3>数据分布直方图</h3><div class="chart-box" id="chartHist"></div></div>
+  </div>
+</div>
+
+<script>
+const WS_URL = `ws://${location.hostname || 'localhost'}:8083`;
+let ws = null, connected = false;
+const rawBuf = [], filtBuf = [], alerts = [];
+const devices = new Set();
+let msgCount = 0, alertCount = 0, sampleCount = 0, lastMsgTs = 0, msgPerSec = 0;
+
+const $=id=>document.getElementById(id);
+const ecTime = echarts.init($('chartTime'));
+const ecFFT  = echarts.init($('chartFFT'));
+const ecErr  = echarts.init($('chartError'));
+const ecHist = echarts.init($('chartHist'));
+window.addEventListener('resize',()=>{ecTime.resize();ecFFT.resize();ecErr.resize();ecHist.resize()});
+
+function toggle(){connected?disconnect():connect()}
+
+function connect(){
+  if(ws) ws.close();
+  ws = new WebSocket(WS_URL);
+  ws.onopen=()=>{connected=true;ui()};
+  ws.onclose=()=>{connected=false;ui()};
+  ws.onerror=()=>{connected=false;ui()};
+  ws.onmessage=e=>{
+    try{ handle(JSON.parse(e.data)) }catch{}
+  };
+}
+
+function disconnect(){if(ws){ws.close();ws=null}connected=false;ui()}
+
+function ui(){
+  $('wsDot').className='dot '+(connected?'on':'off');
+  $('wsLabel').textContent=connected?'已连接':'未连接';
+  $('btnConnect').textContent=connected?'断开':'连接';
+  $('btnConnect').className=connected?'btn-danger':'btn-primary';
+}
+
+function handle(d){
+  if(d.type==='welcome')return;
+  msgCount++;
+
+  if(d.type==='anomaly-alert'){
+    alertCount++;
+    alerts.unshift(d);
+    if(alerts.length>30)alerts.pop();
+    if(d.deviceId)devices.add(d.deviceId);
+    renderAlerts();
+    updateStats();
+    return;
+  }
+
+  if(d.deviceId)devices.add(d.deviceId);
+  updateDeviceSelect();
+
+  const selDev=$('deviceSelect').value, selCh=$('channelSelect').value;
+  if(selDev && d.deviceId!==selDev) return;
+  if(selCh && String(d.channelId)!==selCh) return;
+
+  const samples=d.samples||[];
+  if(!samples.length)return;
+  sampleCount+=samples.length;
+
+  if(d.type==='raw-signal'){
+    rawBuf.push(...samples);
+    if(rawBuf.length>5000)rawBuf.splice(0,rawBuf.length-5000);
+  } else if(d.type==='filtered-signal'){
+    filtBuf.push(...samples);
+    if(filtBuf.length>5000)filtBuf.splice(0,filtBuf.length-5000);
+  }
+  updateStats();
+}
+
+function renderAlerts(){
+  const el=$('alertList');
+  $('alertBadge').style.display=alerts.length?'':'none';
+  $('alertBadge').textContent=alerts.length;
+  if(!alerts.length){el.innerHTML='<div class="alert-empty">监测中，暂无异常数据</div>';return}
+  el.innerHTML=alerts.slice(0,15).map((a,i)=>{
+    const lv=a.alertLevel||0;
+    const tagCls=lv>=3?'tag-l3':lv>=2?'tag-l2':'tag-l1';
+    const tagTxt=lv>=3?'报警':lv>=2?'预警':'关注';
+    const et=a.errorType==='amplitude'?'幅值异常告警':a.errorType==='energy'?'能量异常告警':a.errorType==='counts'?'振铃计数告警':'异常告警';
+    const ts=fmtTs(a.timestamp);
+    return `<div class="alert-item"><span class="tag ${tagCls}">${tagTxt}</span><span class="alert-time">${ts}</span><span class="alert-label">${et}</span><span class="alert-val">能量值: <strong>${fmt(a.energy)}</strong></span><span class="alert-val">监测值: <strong>${fmt(a.amplitude)}</strong></span></div>`;
+  }).join('');
+}
+
+function fmtTs(ts){
+  if(!ts)return'--';
+  const ms=ts>1e15?ts/1e6:ts;
+  const d=new Date(ms);
+  return d.toTimeString().split(' ')[0]+'.'+String(d.getMilliseconds()).padStart(3,'0');
+}
+function fmt(v){return v!=null?Number(v).toFixed(4):'--'}
+
+function updateDeviceSelect(){
+  const sel=$('deviceSelect');
+  const cur=sel.value;
+  const opts=['<option value="">全部</option>'];
+  devices.forEach(d=>opts.push(`<option value="${d}"${d===cur?' selected':''}>${d}</option>`));
+  sel.innerHTML=opts.join('');
+}
+
+function updateStats(){
+  $('statMsg').textContent=msgCount;
+  $('statAlert').textContent=alertCount;
+  $('statDevice').textContent=devices.size;
+  $('statSamples').textContent=sampleCount>1e6?(sampleCount/1e6).toFixed(1)+'M':sampleCount>1e3?(sampleCount/1e3).toFixed(1)+'K':sampleCount;
+}
+
+/* ---- Charts ---- */
+function fft(signal){
+  const N=signal.length;
+  const out=new Array(N/2);
+  for(let k=0;k<N/2;k++){
+    let re=0,im=0;
+    for(let n=0;n<N;n++){
+      const angle=-2*Math.PI*k*n/N;
+      re+=signal[n]*Math.cos(angle);
+      im+=signal[n]*Math.sin(angle);
+    }
+    out[k]=Math.sqrt(re*re+im*im)/N;
+  }
+  return out;
+}
+
+function downsample(arr,maxPts){
+  if(arr.length<=maxPts)return arr;
+  const step=arr.length/maxPts;
+  const out=[];
+  for(let i=0;i<maxPts;i++)out.push(arr[Math.floor(i*step)]);
+  return out;
+}
+
+function histogram(arr,bins){
+  if(!arr.length)return{edges:[],counts:[]};
+  let min=Infinity,max=-Infinity;
+  for(const v of arr){if(v<min)min=v;if(v>max)max=v}
+  if(min===max){max=min+1}
+  const w=(max-min)/bins;
+  const counts=new Array(bins).fill(0);
+  const edges=[];
+  for(let i=0;i<bins;i++)edges.push(+(min+w*i).toFixed(6));
+  for(const v of arr){let b=Math.floor((v-min)/w);if(b>=bins)b=bins-1;counts[b]++}
+  return{edges,counts};
+}
+
+function renderCharts(){
+  const rawSlice=rawBuf.slice(-500);
+  const filtSlice=filtBuf.slice(-500);
+  const rawDs=downsample(rawSlice,200);
+  const filtDs=downsample(filtSlice,200);
+
+  ecTime.setOption({
+    animation:false,
+    tooltip:{trigger:'axis'},
+    legend:{data:['原始信号','滤波信号'],top:0,textStyle:{fontSize:11}},
+    grid:{top:30,bottom:30,left:50,right:20},
+    xAxis:{type:'category',data:rawDs.map((_,i)=>i),axisLabel:{show:false}},
+    yAxis:{type:'value',scale:true},
+    series:[
+      {name:'原始信号',type:'line',data:rawDs,symbol:'none',lineStyle:{width:1,color:'rgba(64,158,255,.6)'},areaStyle:{color:'rgba(64,158,255,.08)'}},
+      {name:'滤波信号',type:'line',data:filtDs,symbol:'none',lineStyle:{width:1.5,color:'#f56c6c'}}
+    ]
+  },true);
+
+  const fftSize=128;
+  if(rawSlice.length>=fftSize){
+    const rawFFT=fft(rawSlice.slice(-fftSize));
+    const filtFFT=fft(filtSlice.length>=fftSize?filtSlice.slice(-fftSize):rawSlice.slice(-fftSize));
+    ecFFT.setOption({
+      animation:false,
+      tooltip:{trigger:'axis'},
+      legend:{data:['原始频谱','滤波频谱'],top:0,textStyle:{fontSize:11}},
+      grid:{top:30,bottom:30,left:50,right:20},
+      xAxis:{type:'category',data:rawFFT.map((_,i)=>i),name:'频率 (Hz)',nameLocation:'center',nameGap:20},
+      yAxis:{type:'value',scale:true},
+      series:[
+        {name:'原始频谱',type:'line',data:rawFFT,symbol:'none',lineStyle:{width:1,color:'rgba(64,158,255,.6)'},areaStyle:{color:'rgba(64,158,255,.08)'}},
+        {name:'滤波频谱',type:'line',data:filtFFT,symbol:'none',lineStyle:{width:1.5,color:'#f56c6c'}}
+      ]
+    },true);
+  }
+
+  if(rawSlice.length>10 && filtSlice.length>10){
+    const minLen=Math.min(rawSlice.length,filtSlice.length);
+    const errs=[];
+    for(let i=0;i<minLen;i++)errs.push(rawSlice[rawSlice.length-minLen+i]-filtSlice[filtSlice.length-minLen+i]);
+    const errDs=downsample(errs,200);
+    ecErr.setOption({
+      animation:false,
+      tooltip:{trigger:'axis'},
+      grid:{top:20,bottom:30,left:50,right:20},
+      xAxis:{type:'category',data:errDs.map((_,i)=>i),axisLabel:{show:false}},
+      yAxis:{type:'value',scale:true},
+      series:[{type:'line',data:errDs,symbol:'none',lineStyle:{width:1,color:'#67c23a'},areaStyle:{color:'rgba(103,194,58,.1)'}}]
+    },true);
+  }
+
+  const allData=[...rawBuf.slice(-2000),...filtBuf.slice(-2000)];
+  if(allData.length>20){
+    const h1=histogram(rawBuf.slice(-2000),30);
+    const h2=histogram(filtBuf.slice(-2000),30);
+    ecHist.setOption({
+      animation:false,
+      tooltip:{trigger:'axis'},
+      legend:{data:['原始分布','滤波分布'],top:0,textStyle:{fontSize:11}},
+      grid:{top:30,bottom:30,left:50,right:20},
+      xAxis:{type:'category',data:h1.edges.map(v=>v.toFixed(4))},
+      yAxis:{type:'value'},
+      series:[
+        {name:'原始分布',type:'bar',data:h1.counts,barWidth:'40%',itemStyle:{color:'rgba(64,158,255,.5)'}},
+        {name:'滤波分布',type:'bar',data:h2.counts,barWidth:'40%',itemStyle:{color:'rgba(245,108,108,.5)'}}
+      ]
+    },true);
+  }
+}
+
+setInterval(renderCharts,300);
+setInterval(()=>{
+  const now=Date.now();
+  if(lastMsgTs){msgPerSec=Math.round(msgCount/((now-lastMsgTs)/1000)||0)}
+  $('msgRate').textContent=`${msgPerSec} msg/s | raw:${rawBuf.length} filt:${filtBuf.length}`;
+},1000);
+lastMsgTs=Date.now();
+
+ui();
+connect();
+</script>
+</body>
+</html>
