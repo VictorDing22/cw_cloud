@@ -21,9 +21,11 @@ from websockets.datastructures import Headers as WsHeaders
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "kafka:9092")
 FILTERED_TOPIC = os.getenv("FILTERED_TOPIC", "filtered_topic")
 RAW_TOPIC = os.getenv("RAW_TOPIC", "raw_topic")
+ANOMALY_TOPIC = os.getenv("ANOMALY_TOPIC", "anomaly_topic")
 WS_PORT = int(os.getenv("WS_PORT", "8083"))
 THROTTLE_MS = int(os.getenv("THROTTLE_MS", "200"))
 INCLUDE_RAW = os.getenv("INCLUDE_RAW", "true").lower() == "true"
+INCLUDE_ANOMALY = os.getenv("INCLUDE_ANOMALY", "true").lower() == "true"
 MAX_DISPLAY_SAMPLES = int(os.getenv("MAX_DISPLAY_SAMPLES", "500"))
 
 
@@ -165,10 +167,22 @@ async def ws_handler(ws):
         print(f"[WS] - {remote}  clients={len(clients)}", flush=True)
 
 
+def parse_anomaly_message(raw_msg: str) -> Optional[Dict]:
+    """anomaly_topic messages are already JSON from SignalAnomalyJob"""
+    try:
+        data = json.loads(raw_msg)
+        data["type"] = "anomaly-alert"
+        return data
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
 async def kafka_loop():
     topics = [FILTERED_TOPIC]
     if INCLUDE_RAW:
         topics.append(RAW_TOPIC)
+    if INCLUDE_ANOMALY:
+        topics.append(ANOMALY_TOPIC)
 
     print(f"[Kafka] Connecting: brokers={KAFKA_BROKERS}, topics={topics}", flush=True)
 
@@ -197,6 +211,13 @@ async def kafka_loop():
         stats["kafka_received"] += sum(len(r) for r in messages.values())
 
         for tp, records in messages.items():
+            if tp.topic == ANOMALY_TOPIC:
+                for msg in records[-50:]:
+                    parsed = parse_anomaly_message(msg.value)
+                    if parsed:
+                        await broadcast(parsed)
+                continue
+
             tail = records[-20:] if len(records) > 20 else records
             seen = set()
             for msg in reversed(tail):

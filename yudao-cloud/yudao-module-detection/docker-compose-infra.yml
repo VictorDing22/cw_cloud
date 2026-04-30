@@ -197,9 +197,11 @@ services:
       KAFKA_BROKERS: "kafka:9092"
       FILTERED_TOPIC: "filtered_topic"
       RAW_TOPIC: "raw_topic"
+      ANOMALY_TOPIC: "anomaly_topic"
       WS_PORT: "8083"
       THROTTLE_MS: "200"
       INCLUDE_RAW: "true"
+      INCLUDE_ANOMALY: "true"
       MAX_DISPLAY_SAMPLES: "500"
     depends_on:
       kafka:

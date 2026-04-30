@@ -1,120 +1,92 @@
 <template>
   <div class="detection-container">
-    <!-- 顶部：上传 + 配置（桌面端两列，移动端一列） -->
-    <el-row :gutter="20" class="mb-4">
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never" class="upload-card">
-      <template #header>
-        <div class="flex items-center justify-between">
-              <span class="text-lg font-bold">上传 TDMS 文件</span>
-          <el-tag v-if="currentTask.filename" type="info" size="small">{{ currentTask.filename }}</el-tag>
-        </div>
-      </template>
-      <el-upload
-        class="tdms-uploader"
-        drag
-        action="#"
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        accept=".tdms"
-      >
-        <Icon icon="ep:upload-filled" class="upload-icon" />
-            <div class="el-upload__text">拖拽文件到此处或 <em>点击选择</em></div>
-        <template #tip>
-          <div class="el-upload__tip text-center">仅支持 .tdms 文件</div>
-        </template>
-      </el-upload>
-    </el-card>
-      </el-col>
+    <el-tabs v-model="activeTab" type="border-card" class="detection-tabs">
 
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never" class="config-card">
-      <template #header>
-            <span class="text-lg font-bold">参数配置</span>
-      </template>
-      <el-form :model="config" label-position="top" class="config-form">
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <el-form-item label="滤波算法">
-              <el-select v-model="config.algorithm" placeholder="选择算法" class="w-full">
-                <el-option
-                  v-for="algo in algorithms"
-                  :key="algo.id"
-                  :label="`${algo.id} - ${algo.name}`"
-                  :value="algo.id"
-                >
-                  <span style="float: left">{{ algo.id }} - {{ algo.name }}</span>
-                      <span style="float: right; color: #909399; font-size: 13px; margin-left: 10px">{{ algo.desc }}</span>
-                </el-option>
-              </el-select>
-            </el-form-item>
+      <!-- ==================== Tab 1: 文件检测 ==================== -->
+      <el-tab-pane label="首页" name="file">
+        <el-row :gutter="20" class="mb-4">
+          <el-col :xs="24" :md="12">
+            <el-card shadow="never" class="upload-card">
+              <template #header>
+                <div class="flex items-center justify-between">
+                  <span class="text-lg font-bold">上传 TDMS 文件</span>
+                  <el-tag v-if="currentTask.filename" type="info" size="small">{{ currentTask.filename }}</el-tag>
+                </div>
+              </template>
+              <el-upload class="tdms-uploader" drag action="#" :auto-upload="false" :on-change="handleFileChange" accept=".tdms">
+                <Icon icon="ep:upload-filled" class="upload-icon" />
+                <div class="el-upload__text">拖拽文件到此处或 <em>点击选择</em></div>
+                <template #tip>
+                  <div class="el-upload__tip text-center">仅支持 .tdms 文件</div>
+                </template>
+              </el-upload>
+            </el-card>
           </el-col>
-          <el-col :span="8">
-            <el-form-item label="过程噪声 (Q)">
-              <el-input-number v-model="config.processNoise" :precision="4" :step="0.001" class="w-full" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="测量噪声 (R)">
-              <el-input-number v-model="config.measurementNoise" :precision="4" :step="0.01" class="w-full" />
-            </el-form-item>
+          <el-col :xs="24" :md="12">
+            <el-card shadow="never" class="config-card">
+              <template #header><span class="text-lg font-bold">参数配置</span></template>
+              <el-form :model="config" label-position="top" class="config-form">
+                <el-row :gutter="20">
+                  <el-col :span="8">
+                    <el-form-item label="滤波算法">
+                      <el-select v-model="config.algorithm" placeholder="选择算法" class="w-full">
+                        <el-option v-for="algo in algorithms" :key="algo.id" :label="`${algo.id} - ${algo.name}`" :value="algo.id">
+                          <span style="float: left">{{ algo.id }} - {{ algo.name }}</span>
+                          <span style="float: right; color: #909399; font-size: 13px; margin-left: 10px">{{ algo.desc }}</span>
+                        </el-option>
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="8">
+                    <el-form-item label="过程噪声 (Q)">
+                      <el-input-number v-model="config.processNoise" :precision="4" :step="0.001" class="w-full" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="8">
+                    <el-form-item label="测量噪声 (R)">
+                      <el-input-number v-model="config.measurementNoise" :precision="4" :step="0.01" class="w-full" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <div class="flex justify-center mt-4 gap-4">
+                  <el-button type="primary" size="large" :loading="processing" @click="startDetection" :disabled="!selectedFile" class="start-btn">
+                    <Icon icon="ep:video-play" class="mr-1" />
+                    {{ processing ? '正在处理数据...' : '触发检测流程' }}
+                  </el-button>
+                </div>
+              </el-form>
+            </el-card>
           </el-col>
         </el-row>
-        <div class="flex justify-center mt-4 gap-4">
-          <el-button type="info" plain icon="ep:setting">告警阈值配置</el-button>
-          <el-button 
-            type="primary" 
-            size="large"
-            :loading="processing" 
-            @click="startDetection"
-            :disabled="!selectedFile"
-            class="start-btn"
-          >
-            <Icon icon="ep:video-play" class="mr-1" />
-            {{ processing ? '正在处理数据...' : '触发检测流程' }}
-          </el-button>
-        </div>
-      </el-form>
-    </el-card>
-      </el-col>
-    </el-row>
 
-    <!-- 3. 下部：处理进度与详情 -->
-    <el-card shadow="never" class="mb-4 progress-card" v-if="currentTask.id">
-      <template #header>
-        <div class="flex justify-between items-center">
-          <span class="text-lg font-bold">处理进度</span>
-          <el-tag :type="statusTagType" size="small">{{ statusText }}</el-tag>
-        </div>
-      </template>
-      <div class="progress-wrapper">
-        <el-progress 
-          :percentage="progress" 
-          :stroke-width="20" 
-          :color="progressColors"
-          striped
-          striped-flow
-        />
-        <div class="task-details mt-4">
-          <el-descriptions :column="3" border size="small">
-            <el-descriptions-item label="任务ID">{{ currentTask.id }}</el-descriptions-item>
-            <el-descriptions-item label="信号源">{{ currentTask.filename }}</el-descriptions-item>
-            <el-descriptions-item label="滤波算法">{{ currentTask.algorithm }}</el-descriptions-item>
-            <el-descriptions-item label="文件大小">{{ currentTask.size }}</el-descriptions-item>
-            <el-descriptions-item label="当前状态">{{ statusText }}</el-descriptions-item>
-            <el-descriptions-item label="处理速度">
-              {{ currentTask.speed ? `${Number.parseFloat(String(currentTask.speed)).toFixed(2)} MB/s` : '计算中...' }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 4. 可视化：异常监测告警（横向条状）和波形展示 -->
-    <el-card shadow="never" class="viz-card">
+        <el-card shadow="never" class="mb-4 progress-card" v-if="currentTask.id">
           <template #header>
             <div class="flex justify-between items-center">
-              <span class="text-lg font-bold">面向客户展示：时序数据库信号回放</span>
+              <span class="text-lg font-bold">处理进度</span>
+              <el-tag :type="statusTagType" size="small">{{ statusText }}</el-tag>
+            </div>
+          </template>
+          <div class="progress-wrapper">
+            <el-progress :percentage="progress" :stroke-width="20" :color="progressColors" striped striped-flow />
+            <div class="task-details mt-4">
+              <el-descriptions :column="3" border size="small">
+                <el-descriptions-item label="任务ID">{{ currentTask.id }}</el-descriptions-item>
+                <el-descriptions-item label="信号源">{{ currentTask.filename }}</el-descriptions-item>
+                <el-descriptions-item label="滤波算法">{{ currentTask.algorithm }}</el-descriptions-item>
+                <el-descriptions-item label="文件大小">{{ currentTask.size }}</el-descriptions-item>
+                <el-descriptions-item label="当前状态">{{ statusText }}</el-descriptions-item>
+                <el-descriptions-item label="处理速度">
+                  {{ currentTask.speed ? `${Number.parseFloat(String(currentTask.speed)).toFixed(2)} MB/s` : '计算中...' }}
+                </el-descriptions-item>
+              </el-descriptions>
+            </div>
+          </div>
+        </el-card>
+
+        <el-card shadow="never" class="viz-card">
+          <template #header>
+            <div class="flex justify-between items-center">
+              <span class="text-lg font-bold">时序数据库信号回放</span>
               <div class="flex items-center gap-4">
                 <el-button-group size="small">
                   <el-button type="primary" :icon="isPlaying ? 'ep:video-pause' : 'ep:video-play'" @click="togglePlayback">
@@ -122,121 +94,86 @@
                   </el-button>
                   <el-button icon="ep:refresh" @click="resetPlayback">重置</el-button>
                 </el-button-group>
-                <el-slider 
-                  v-model="playbackIndex" 
-                  :max="totalPoints" 
-                  :show-tooltip="false" 
-                  class="playback-slider" 
-                  @change="onPlaybackChange" 
-                />
+                <el-slider v-model="playbackIndex" :max="totalPoints" :show-tooltip="false" class="playback-slider" @change="onPlaybackChange" />
               </div>
             </div>
           </template>
-      
-      <!-- 实时异常监测告警 - 横向条状 -->
-      <div class="anomaly-bar-container mb-4">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-base font-bold">实时异常监测告警</span>
-          <el-badge :value="anomalies.length" type="danger" v-if="anomalies.length > 0" />
-        </div>
-        <div class="anomaly-bar-wrapper">
-          <div v-if="anomalies.length === 0" class="anomaly-empty">
-            <el-empty description="监测中，暂无异常数据" :image-size="80" />
-          </div>
-          <div v-else class="anomaly-bar-list">
-            <div
-              v-for="(item, index) in anomalies.slice(0, 10)"
-                :key="index"
-              class="anomaly-bar-item"
-              :class="{ 'new-anomaly': index === 0 }"
-              >
-              <div class="anomaly-bar-content">
-                <div class="flex items-center gap-3">
-                  <el-tag size="small" :type="item.severity === 'high' ? 'danger' : 'warning'">
-                    {{ item.severity === 'high' ? '高危' : '中危' }}
-                  </el-tag>
-                  <span class="anomaly-time">{{ formatTime(item.timestamp) }}</span>
-                  <span class="anomaly-label">能量异常告警</span>
-                  <span class="anomaly-value">能量值: <strong>{{ item.energy.toFixed(2) }}</strong></span>
-                  <span class="anomaly-value">监测值: <strong>{{ item.value.toFixed(4) }}</strong></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- 波形图展示 -->
-      <div class="charts-container">
-        <AdvancedWaveformChart 
-          :original-data="displayRaw" 
-          :filtered-data="displayFiltered" 
-          :start-index="displayStartIndex"
-          :accumulated-original-data="accumulatedRaw"
-          :accumulated-filtered-data="accumulatedFiltered"
-        />
+          <AnomalyAlertBar :anomalies="anomalies" />
+          <div class="charts-container">
+            <AdvancedWaveformChart :original-data="displayRaw" :filtered-data="displayFiltered" :start-index="displayStartIndex"
+              :accumulated-original-data="accumulatedRaw" :accumulated-filtered-data="accumulatedFiltered" />
           </div>
         </el-card>
+      </el-tab-pane>
+
+      <!-- ==================== Tab 2: 信息源检测（实时流水线） ==================== -->
+      <el-tab-pane label="信息源检测" name="realtime">
+        <el-card shadow="never" class="mb-4">
+          <template #header>
+            <div class="flex justify-between items-center">
+              <span class="text-lg font-bold">Flink 实时流水线监控</span>
+              <div class="flex items-center gap-3">
+                <el-tag :type="rtConnected ? 'success' : 'danger'" size="small" effect="dark">
+                  {{ rtConnected ? '已连接' : '未连接' }}
+                </el-tag>
+                <el-select v-model="rtSelectedDevice" placeholder="选择设备" size="small" style="width: 180px" clearable>
+                  <el-option v-for="d in rtDevices" :key="d" :label="d" :value="d" />
+                </el-select>
+                <el-select v-model="rtSelectedChannel" placeholder="通道" size="small" style="width: 100px" clearable>
+                  <el-option :label="'全部'" :value="''" />
+                  <el-option v-for="c in [1,2,3]" :key="c" :label="'CH' + c" :value="c" />
+                </el-select>
+                <el-button v-if="!rtConnected" type="primary" size="small" @click="connectRealtime">连接</el-button>
+                <el-button v-else type="danger" size="small" @click="disconnectRealtime">断开</el-button>
+              </div>
+            </div>
+          </template>
+
+          <!-- 实时异常监测告警 -->
+          <AnomalyAlertBar :anomalies="rtAnomalies" />
+
+          <!-- 实时波形图 -->
+          <div class="charts-container">
+            <AdvancedWaveformChart :original-data="rtDisplayRaw" :filtered-data="rtDisplayFiltered" :start-index="0"
+              :accumulated-original-data="rtAccRaw" :accumulated-filtered-data="rtAccFiltered" />
+          </div>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import AdvancedWaveformChart from './components/AdvancedWaveformChart.vue'
+import AnomalyAlertBar from './components/AnomalyAlertBar.vue'
 import dayjs from 'dayjs'
 import { useMessage } from '@/hooks/web/useMessage'
 import { DetectionApi } from '@/api/monitor/detection'
 
-// --- 状态定义 ---
-const message = useMessage() // 消息弹窗
+const message = useMessage()
+const activeTab = ref('realtime')
+
+// ===================== Tab 1: 文件检测（原逻辑保留） =====================
 const selectedFile = ref<File | null>(null)
 const processing = ref(false)
 const progress = ref(0)
 const isPlaying = ref(false)
 const playbackIndex = ref(0)
 const totalPoints = ref(0)
-let socket: WebSocket | null = null
+let fileSocket: WebSocket | null = null
 
-const config = reactive({
-  algorithm: 'KALMAN',
-  processNoise: 0.001,
-  measurementNoise: 0.05
-})
-
+const config = reactive({ algorithm: 'KALMAN', processNoise: 0.001, measurementNoise: 0.05 })
 const algorithms = [
   { id: 'KALMAN', name: '卡尔曼滤波', desc: '最优估计' },
-  { id: 'LMS', name: 'LMS自适应', desc: '快速收敛' },
-  { id: 'NLMS', name: 'NLMS归一化', desc: '稳定性好' },
   { id: 'RLS', name: 'RLS递推', desc: '高精度' },
-  { id: 'MEAN', name: '均值滤波', desc: '简单高效' },
-  { id: 'MEDIAN', name: '中值滤波', desc: '抗脉冲' },
-  { id: 'GAUSSIAN', name: '高斯滤波', desc: '平滑效果' },
   { id: 'BUTTERWORTH', name: '巴特沃斯', desc: '频率选择' },
-  { id: 'CHEBYSHEV', name: '切比雪夫', desc: '陡峭过渡' },
   { id: 'FIR', name: 'FIR滤波', desc: '线性相位' },
-  { id: 'IIR', name: 'IIR滤波', desc: '高效实现' },
-  { id: 'WIENER', name: '维纳滤波', desc: '最优线性' },
   { id: 'WAVELET', name: '小波滤波', desc: '多尺度' },
-  { id: 'MORPHOLOGY', name: '形态学', desc: '形状保持' },
-  { id: 'BILATERAL', name: '双边滤波', desc: '边缘保护' },
-  { id: 'SG', name: 'SG平滑', desc: '多项式' },
-  { id: 'PARTICLE', name: '粒子滤波', desc: '非线性' },
-  { id: 'EKF', name: '扩展卡尔曼', desc: 'EKF' },
-  { id: 'UKF', name: '无损卡尔曼', desc: 'UKF' },
-  { id: 'NOTCH', name: '自适应陷波', desc: '频率消除' }
 ]
 
-const currentTask = reactive({
-  id: '',
-  filename: '',
-  algorithm: '',
-  size: '',
-  speed: '',
-  status: ''
-})
-
-// 状态文本转换
+const currentTask = reactive({ id: '', filename: '', algorithm: '', size: '', speed: '', status: '' })
 const statusText = computed(() => {
   switch (currentTask.status) {
     case 'PROCESSING': return '处理中...'
@@ -245,7 +182,6 @@ const statusText = computed(() => {
     default: return '等待开始'
   }
 })
-
 const statusTagType = computed(() => {
   switch (currentTask.status) {
     case 'PROCESSING': return 'warning'
@@ -255,31 +191,21 @@ const statusTagType = computed(() => {
   }
 })
 
-// 原始全量数据 (从 TDengine 获取)
 const allRawData = ref<any[]>([])
 const allFilteredData = ref<any[]>([])
-
-// 当前显示的切片数据（用于回放）
 const displayRaw = ref<any[]>([])
 const displayFiltered = ref<any[]>([])
 const displayStartIndex = ref(0)
-// 累计数据（用于“随播放逐步增长”的误差分布/直方图）
 const accumulatedRaw = ref<any[]>([])
 const accumulatedFiltered = ref<any[]>([])
 const anomalies = ref<any[]>([])
-
-// 节流累计数据更新，避免每 50ms slice 大数组导致 UI 更新被拖到“最后一刻”
 let lastAccumulateUpdateMs = 0
 
 const progressColors = [
-  { color: '#f56c6c', percentage: 20 },
-  { color: '#e6a23c', percentage: 40 },
-  { color: '#5cb87a', percentage: 60 },
-  { color: '#1989fa', percentage: 80 },
+  { color: '#f56c6c', percentage: 20 }, { color: '#e6a23c', percentage: 40 },
+  { color: '#5cb87a', percentage: 60 }, { color: '#1989fa', percentage: 80 },
   { color: '#6f7ad3', percentage: 100 },
 ]
-
-// --- 方法 ---
 
 const handleFileChange = (file: any) => {
   selectedFile.value = file.raw
@@ -289,159 +215,137 @@ const handleFileChange = (file: any) => {
 
 const startDetection = async () => {
   if (!selectedFile.value) return
-  
   processing.value = true
   progress.value = 0
   anomalies.value = []
   resetPlayback()
-  
   try {
     const res = await DetectionApi.uploadAndDetect(selectedFile.value, config.algorithm)
-    currentTask.id = res.id
-    currentTask.algorithm = res.algorithm
-    currentTask.status = res.status
-    currentTask.size = res.size
-    
-    // 建立 WebSocket 接收实时异常
-    connectWebSocket()
-    
-    // 轮询进度
+    Object.assign(currentTask, { id: res.id, algorithm: res.algorithm, status: res.status, size: res.size })
     const timer = setInterval(async () => {
       try {
-        const statusRes = await DetectionApi.getTaskStatus(currentTask.id)
-        progress.value = statusRes.progress
-        currentTask.status = statusRes.status
-        currentTask.speed = statusRes.speed
-        
-        if (statusRes.status === 'COMPLETED') {
-          clearInterval(timer)
-          processing.value = false
-          message.success('数据处理完毕，正在从时序数据库加载结果...')
-          fetchTaskResults(currentTask.id)
-        } else if (statusRes.status === 'FAILED') {
-          clearInterval(timer)
-          processing.value = false
-          message.error('处理过程出现错误')
-        }
-      } catch (err) {
-        clearInterval(timer)
-        processing.value = false
-      }
+        const s = await DetectionApi.getTaskStatus(currentTask.id)
+        progress.value = s.progress; currentTask.status = s.status; currentTask.speed = s.speed
+        if (s.status === 'COMPLETED') { clearInterval(timer); processing.value = false; message.success('处理完毕'); fetchTaskResults(currentTask.id) }
+        else if (s.status === 'FAILED') { clearInterval(timer); processing.value = false; message.error('处理失败') }
+      } catch { clearInterval(timer); processing.value = false }
     }, 1000)
-    
-  } catch (e) {
-    processing.value = false
-    message.error('上传失败，请检查后端服务')
-  }
+  } catch { processing.value = false; message.error('上传失败') }
 }
 
 const fetchTaskResults = async (taskId: string) => {
   try {
     const data = await DetectionApi.getTaskResults(taskId)
-    const raw: any[] = []
-    const filtered: any[] = []
-    
-    data.forEach((r: any) => {
-      raw.push([r.timestamp, r.originalValue])
-      filtered.push([r.timestamp, r.filteredValue])
-    })
-    
-    allRawData.value = raw
-    allFilteredData.value = filtered
-    totalPoints.value = data.length
-    playbackIndex.value = 0
-    startPlayback()
-  } catch (e) {
-    message.error('获取回放数据失败')
-  }
+    const raw: any[] = [], filtered: any[] = []
+    data.forEach((r: any) => { raw.push([r.timestamp, r.originalValue]); filtered.push([r.timestamp, r.filteredValue]) })
+    allRawData.value = raw; allFilteredData.value = filtered
+    totalPoints.value = data.length; playbackIndex.value = 0; startPlayback()
+  } catch { message.error('获取回放数据失败') }
 }
 
-// WebSocket 实时通信
-const connectWebSocket = () => {
-  if (socket) socket.close()
-  
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  // 根据后端 DetectionController 所在的模块端口决定，这里假设是 48083 (或者是网关 48080)
-  const wsUrl = `${protocol}//${window.location.hostname}:48080/ws/detection`
-  
-  socket = new WebSocket(wsUrl)
-  
-  socket.onmessage = (event) => {
-    const data = JSON.parse(event.data)
-    if (data.anomaly) {
-      anomalies.value.unshift({
-        timestamp: data.timestamp,
-        energy: data.energy || 0,
-        value: data.originalValue || 0,
-        severity: data.energy > 70 ? 'high' : 'medium'
-      })
-      if (anomalies.value.length > 30) anomalies.value.pop()
-    }
-  }
-}
-
-// 回放控制逻辑
 let playbackTimer: any = null
-const startPlayback = () => {
-  if (playbackTimer) clearInterval(playbackTimer)
-  isPlaying.value = true
-  
-  playbackTimer = setInterval(() => {
-    if (playbackIndex.value < totalPoints.value) {
-      playbackIndex.value += 2
-      updateDisplayData()
-    } else {
-      pausePlayback()
-    }
-  }, 50)
-}
-
-const pausePlayback = () => {
-  isPlaying.value = false
-  if (playbackTimer) clearInterval(playbackTimer)
-}
-
-const togglePlayback = () => {
-  if (isPlaying.value) pausePlayback()
-  else startPlayback()
-}
-
-const resetPlayback = () => {
-  playbackIndex.value = 0
-  updateDisplayData()
-  pausePlayback()
-}
-
-const onPlaybackChange = () => {
-  updateDisplayData()
-}
-
+const startPlayback = () => { if (playbackTimer) clearInterval(playbackTimer); isPlaying.value = true; playbackTimer = setInterval(() => { if (playbackIndex.value < totalPoints.value) { playbackIndex.value += 2; updateDisplayData() } else pausePlayback() }, 50) }
+const pausePlayback = () => { isPlaying.value = false; if (playbackTimer) clearInterval(playbackTimer) }
+const togglePlayback = () => { isPlaying.value ? pausePlayback() : startPlayback() }
+const resetPlayback = () => { playbackIndex.value = 0; updateDisplayData(); pausePlayback() }
+const onPlaybackChange = () => updateDisplayData()
 const updateDisplayData = () => {
-  // 时域显示窗口：太小会看起来“全图没数据”（尤其是信号变化不快时）
-  // 放大窗口并在图表侧做下采样，保证“满屏有波形”且不卡顿
-  const windowSize = 1000
-  const end = playbackIndex.value
-  const start = Math.max(0, end - windowSize)
-  
+  const windowSize = 1000, end = playbackIndex.value, start = Math.max(0, end - windowSize)
   displayRaw.value = allRawData.value.slice(start, end)
   displayFiltered.value = allFilteredData.value.slice(start, end)
   displayStartIndex.value = start
-
-  // 累计到当前播放进度（让直方图/误差分布“慢慢增长”，而不是最后一秒才跳）
   const now = Date.now()
-  // 每 200ms 更新一次累计数据即可肉眼平滑增长
   if (now - lastAccumulateUpdateMs > 200 || end >= totalPoints.value) {
     accumulatedRaw.value = allRawData.value.slice(0, end)
     accumulatedFiltered.value = allFilteredData.value.slice(0, end)
     lastAccumulateUpdateMs = now
   }
 }
-
 const formatTime = (ts: number) => dayjs(ts).format('HH:mm:ss.SSS')
+
+// ===================== Tab 2: 实时流水线监控 =====================
+const rtConnected = ref(false)
+let rtSocket: WebSocket | null = null
+const rtSelectedDevice = ref('')
+const rtSelectedChannel = ref<number | string>('')
+const rtDevices = ref<string[]>([])
+const rtAnomalies = ref<any[]>([])
+
+const RT_WINDOW = 500
+const rtRawBuffer = ref<number[]>([])
+const rtFilteredBuffer = ref<number[]>([])
+const rtDisplayRaw = ref<any[]>([])
+const rtDisplayFiltered = ref<any[]>([])
+const rtAccRaw = ref<any[]>([])
+const rtAccFiltered = ref<any[]>([])
+let rtGlobalIdx = 0
+
+const connectRealtime = () => {
+  if (rtSocket) rtSocket.close()
+  const wsUrl = `ws://${window.location.hostname}:8083`
+  rtSocket = new WebSocket(wsUrl)
+  rtSocket.onopen = () => { rtConnected.value = true; message.success('已连接实时流水线') }
+  rtSocket.onclose = () => { rtConnected.value = false }
+  rtSocket.onerror = () => { rtConnected.value = false; message.error('WebSocket 连接失败') }
+  rtSocket.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'welcome') return
+
+      if (data.type === 'anomaly-alert') {
+        rtAnomalies.value.unshift(data)
+        if (rtAnomalies.value.length > 30) rtAnomalies.value.pop()
+        if (data.deviceId && !rtDevices.value.includes(data.deviceId)) rtDevices.value.push(data.deviceId)
+        return
+      }
+
+      if (data.deviceId && !rtDevices.value.includes(data.deviceId)) rtDevices.value.push(data.deviceId)
+
+      if (rtSelectedDevice.value && data.deviceId !== rtSelectedDevice.value) return
+      if (rtSelectedChannel.value && data.channelId !== rtSelectedChannel.value) return
+
+      const samples: number[] = data.samples || []
+      if (samples.length === 0) return
+
+      if (data.type === 'raw-signal') {
+        rtRawBuffer.value.push(...samples)
+        if (rtRawBuffer.value.length > 5000) rtRawBuffer.value = rtRawBuffer.value.slice(-5000)
+      } else if (data.type === 'filtered-signal') {
+        rtFilteredBuffer.value.push(...samples)
+        if (rtFilteredBuffer.value.length > 5000) rtFilteredBuffer.value = rtFilteredBuffer.value.slice(-5000)
+      }
+
+      updateRealtimeDisplay()
+    } catch {}
+  }
+}
+
+const updateRealtimeDisplay = () => {
+  const rawSlice = rtRawBuffer.value.slice(-RT_WINDOW)
+  const filtSlice = rtFilteredBuffer.value.slice(-RT_WINDOW)
+  rtDisplayRaw.value = rawSlice.map((v, i) => [i, v])
+  rtDisplayFiltered.value = filtSlice.map((v, i) => [i, v])
+  rtAccRaw.value = rtRawBuffer.value.map((v, i) => [i, v])
+  rtAccFiltered.value = rtFilteredBuffer.value.map((v, i) => [i, v])
+}
+
+const disconnectRealtime = () => {
+  if (rtSocket) { rtSocket.close(); rtSocket = null }
+  rtConnected.value = false
+}
+
+watch(activeTab, (val) => {
+  if (val === 'realtime' && !rtConnected.value) connectRealtime()
+})
+
+onMounted(() => {
+  if (activeTab.value === 'realtime') connectRealtime()
+})
 
 onUnmounted(() => {
   if (playbackTimer) clearInterval(playbackTimer)
-  if (socket) socket.close()
+  if (fileSocket) fileSocket.close()
+  disconnectRealtime()
 })
 </script>
 
@@ -453,6 +357,15 @@ onUnmounted(() => {
   color: #303133;
   max-width: 1400px;
   margin: 0 auto;
+}
+
+.detection-tabs {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+:deep(.el-tabs__content) {
+  padding: 16px;
 }
 
 :deep(.el-card) {
@@ -468,146 +381,24 @@ onUnmounted(() => {
   color: #303133;
 }
 
-/* 上传区 */
-.tdms-uploader :deep(.el-upload-dragger) {
-  background-color: #fafafa;
-  border: 2px dashed #dcdfe6;
-}
-.tdms-uploader :deep(.el-upload-dragger:hover) {
-  border-color: #409eff;
-}
-.upload-icon {
-  font-size: 64px;
-  color: #909399;
-  margin-bottom: 16px;
-}
+.tdms-uploader :deep(.el-upload-dragger) { background-color: #fafafa; border: 2px dashed #dcdfe6; }
+.tdms-uploader :deep(.el-upload-dragger:hover) { border-color: #409eff; }
+.upload-icon { font-size: 64px; color: #909399; margin-bottom: 16px; }
+.start-btn { padding: 12px 40px; font-size: 16px; }
+.progress-wrapper { padding: 20px 0; }
+:deep(.el-progress-bar__outer) { background-color: #ebeef5 !important; }
+.playback-slider { width: 300px; }
 
-/* 按钮样式 */
-.start-btn {
-  padding: 12px 40px;
-  font-size: 16px;
-}
+@media (max-width: 768px) { .playback-slider { width: 200px; } }
 
-/* 进度条 */
-.progress-wrapper {
-  padding: 20px 0;
-}
-:deep(.el-progress-bar__outer) {
-  background-color: #ebeef5 !important;
-}
-
-/* 回放控制 */
-.playback-slider {
-  width: 300px;
-}
-
-@media (max-width: 768px) {
-  .playback-slider {
-    width: 200px;
-  }
-}
-
-/* 异常监测告警 - 横向条状 */
-.anomaly-bar-container {
-  background: #f5f7fa;
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px solid #ebeef5;
-}
-
-.anomaly-bar-wrapper {
-  width: 100%;
-}
-
-.anomaly-empty {
-  padding: 20px;
-  text-align: center;
-}
-
-.anomaly-bar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.anomaly-bar-item {
-  background: #ffffff;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  padding: 12px 16px;
-  transition: all 0.3s;
-}
-
-.anomaly-bar-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.anomaly-bar-item.new-anomaly {
-  background: rgba(245, 108, 108, 0.08);
-  border-color: #f56c6c;
-  border-left-width: 4px;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(245, 108, 108, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 8px rgba(245, 108, 108, 0);
-  }
-}
-
-.anomaly-bar-content {
-  width: 100%;
-}
-
-.anomaly-time {
-  color: #909399;
-  font-size: 12px;
-  font-family: monospace;
-}
-
-.anomaly-label {
-  color: #303133;
-  font-weight: 500;
-  margin-left: 8px;
-}
-
-.anomaly-value {
-  color: #606266;
-  font-size: 13px;
-  margin-left: 16px;
-}
-
-.anomaly-value strong {
-  color: #f56c6c;
-  font-weight: 600;
-}
-
-/* 通用工具类 */
 .w-full { width: 100%; }
 .gap-4 { gap: 1rem; }
+.gap-3 { gap: 0.75rem; }
 .mb-4 { margin-bottom: 1rem; }
 .mt-4 { margin-top: 1rem; }
 .mr-1 { margin-right: 0.25rem; }
-.h-full { height: 100%; }
 
-:deep(.el-form-item__label) {
-  color: #606266 !important;
-  font-weight: bold;
-}
-
-:deep(.el-descriptions__label) {
-  background: #fafafa !important;
-  color: #606266 !important;
-}
-:deep(.el-descriptions__content) {
-  background: #ffffff !important;
-  color: #303133 !important;
-}
+:deep(.el-form-item__label) { color: #606266 !important; font-weight: bold; }
+:deep(.el-descriptions__label) { background: #fafafa !important; color: #606266 !important; }
+:deep(.el-descriptions__content) { background: #ffffff !important; color: #303133 !important; }
 </style>
-
-
