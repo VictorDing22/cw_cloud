@@ -5,7 +5,9 @@ import cn.iocoder.yudao.detection.flink.util.AeFeatureCalculator;
 import cn.iocoder.yudao.detection.flink.util.AeFeatureCalculator.AeFeatures;
 import cn.iocoder.yudao.detection.flink.util.ExceptionMessages;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.common.time.Time;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -54,6 +56,7 @@ public class SignalAnomalyJob {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(30_000);
+        env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3, Time.seconds(30)));
 
         KafkaSource<String> kafkaSource = KafkaSource.<String>builder()
                 .setBootstrapServers(kafkaBroker)

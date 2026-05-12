@@ -3,7 +3,9 @@ package cn.iocoder.yudao.detection.flink.job;
 import cn.iocoder.yudao.detection.flink.sink.TDengineRawSink;
 import cn.iocoder.yudao.detection.flink.util.ExceptionMessages;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.common.time.Time;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
@@ -41,6 +43,7 @@ public class SignalSaveRawJob {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(30_000);
+        env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3, Time.seconds(30)));
 
         KafkaSource<String> kafkaSource = KafkaSource.<String>builder()
                 .setBootstrapServers(kafkaBroker)

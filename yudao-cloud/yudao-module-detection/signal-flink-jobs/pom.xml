@@ -7,8 +7,16 @@
     <groupId>cn.iocoder.yudao</groupId>
     <artifactId>signal-flink-jobs</artifactId>
     <version>1.0.0</version>
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
     <name>Signal Processing Flink Jobs</name>
+
+    <modules>
+        <module>signal-flink-common</module>
+        <module>signal-saveraw-job</module>
+        <module>signal-filter-job</module>
+        <module>signal-savefiltered-job</module>
+        <module>signal-anomaly-job</module>
+    </modules>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
@@ -18,103 +26,104 @@
         <kafka.connector.version>3.1.0-1.18</kafka.connector.version>
         <taos.jdbc.version>3.3.2</taos.jdbc.version>
         <slf4j.version>2.0.12</slf4j.version>
+        <jackson.version>2.15.3</jackson.version>
     </properties>
 
-    <dependencies>
-        <!-- Flink core (provided — already in the cluster) -->
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-streaming-java</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-clients</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <!-- Flink Kafka connector (bundled in fat JAR) -->
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-kafka</artifactId>
-            <version>${kafka.connector.version}</version>
-        </dependency>
-
-        <!-- TDengine JDBC (RESTful, no native lib needed) -->
-        <dependency>
-            <groupId>com.taosdata.jdbc</groupId>
-            <artifactId>taos-jdbcdriver</artifactId>
-            <version>${taos.jdbc.version}</version>
-        </dependency>
-
-        <!-- Jackson (JSON for filter-gateway API calls) -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.15.3</version>
-        </dependency>
-
-        <!-- Logging -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>${slf4j.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>${slf4j.version}</version>
-            <scope>provided</scope>
-        </dependency>
-    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>cn.iocoder.yudao</groupId>
+                <artifactId>signal-flink-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.flink</groupId>
+                <artifactId>flink-streaming-java</artifactId>
+                <version>${flink.version}</version>
+                <scope>provided</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.flink</groupId>
+                <artifactId>flink-clients</artifactId>
+                <version>${flink.version}</version>
+                <scope>provided</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.flink</groupId>
+                <artifactId>flink-connector-kafka</artifactId>
+                <version>${kafka.connector.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.taosdata.jdbc</groupId>
+                <artifactId>taos-jdbcdriver</artifactId>
+                <version>${taos.jdbc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+                <scope>provided</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-simple</artifactId>
+                <version>${slf4j.version}</version>
+                <scope>provided</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals><goal>shade</goal></goals>
-                        <configuration>
-                            <artifactSet>
-                                <excludes>
-                                    <exclude>org.apache.flink:flink-streaming-java</exclude>
-                                    <exclude>org.apache.flink:flink-clients</exclude>
-                                    <exclude>org.apache.flink:flink-core</exclude>
-                                    <exclude>org.apache.flink:flink-java</exclude>
-                                    <exclude>org.apache.flink:flink-runtime</exclude>
-                                    <exclude>org.apache.flink:flink-optimizer</exclude>
-                                    <exclude>org.apache.flink:flink-annotations</exclude>
-                                    <exclude>org.apache.flink:flink-metrics-core</exclude>
-                                    <exclude>org.apache.flink:flink-shaded-*</exclude>
-                                    <exclude>org.slf4j:*</exclude>
-                                    <exclude>log4j:*</exclude>
-                                    <exclude>ch.qos.logback:*</exclude>
-                                </excludes>
-                            </artifactSet>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>3.5.1</version>
+                    <executions>
+                        <execution>
+                            <phase>package</phase>
+                            <goals><goal>shade</goal></goals>
+                            <configuration>
+                                <artifactSet>
                                     <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>org.apache.flink:flink-streaming-java</exclude>
+                                        <exclude>org.apache.flink:flink-clients</exclude>
+                                        <exclude>org.apache.flink:flink-core</exclude>
+                                        <exclude>org.apache.flink:flink-java</exclude>
+                                        <exclude>org.apache.flink:flink-runtime</exclude>
+                                        <exclude>org.apache.flink:flink-optimizer</exclude>
+                                        <exclude>org.apache.flink:flink-annotations</exclude>
+                                        <exclude>org.apache.flink:flink-metrics-core</exclude>
+                                        <exclude>org.apache.flink:flink-shaded-*</exclude>
+                                        <exclude>org.slf4j:*</exclude>
+                                        <exclude>log4j:*</exclude>
+                                        <exclude>ch.qos.logback:*</exclude>
                                     </excludes>
-                                </filter>
-                            </filters>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
+                                </artifactSet>
+                                <filters>
+                                    <filter>
+                                        <artifact>*:*</artifact>
+                                        <excludes>
+                                            <exclude>META-INF/*.SF</exclude>
+                                            <exclude>META-INF/*.DSA</exclude>
+                                            <exclude>META-INF/*.RSA</exclude>
+                                        </excludes>
+                                    </filter>
+                                </filters>
+                                <transformers>
+                                    <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                </transformers>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
 </project>
